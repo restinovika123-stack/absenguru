@@ -595,12 +595,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f"
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -689,9 +689,32 @@ var app = {
                         this.mockData = fbData;
                         localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
                         
-                        // Jika berada di dashboard, kita mungkin perlu refresh tampilan
-                        if (this.state && this.state.currentScreen === 'admin-dashboard' && typeof this.renderAdminDashboard === 'function') this.renderAdminDashboard();
-                        else if (this.state && this.state.currentScreen === 'guru-dashboard' && typeof this.renderGuruDashboard === 'function') this.renderGuruDashboard();
+                        // Jika berada di dashboard atau screen lain, kita mungkin perlu refresh tampilan
+                        if (this.state) {
+                            if (this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
+                            else if (this.state.currentScreen === 'guru-dashboard' && typeof this.loadDashboardGuruData === 'function' && this.state.currentUser) this.loadDashboardGuruData(this.state.currentUser);
+                            else if (this.state.currentScreen === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
+                            else if (this.state.currentScreen === 'admin-riwayat' && typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
+                            else if (this.state.currentScreen === 'guru-riwayat' && typeof this.loadRiwayatGuru === 'function') this.loadRiwayatGuru();
+                        }
+                        
+                        // Perbarui tampilan login jika data sekolah berubah
+                        if (this.mockData && this.mockData.schoolSettings) {
+                            const s = this.mockData.schoolSettings;
+                            if (s.namaSekolah) {
+                                const elNama = document.getElementById('login-nama-sekolah');
+                                if (elNama) elNama.innerText = s.namaSekolah;
+                            }
+                            if (s.logoSekolahUrl) {
+                                const elImg = document.getElementById('login-logo-img');
+                                const elIcon = document.getElementById('login-logo-icon');
+                                if (elImg && elIcon) {
+                                    elImg.src = s.logoSekolahUrl;
+                                    elImg.classList.remove('hidden');
+                                    elIcon.classList.add('hidden');
+                                }
+                            }
+                        }
                     }
                 } else {
                     // Jika dokumen di Firebase belum ada, buat pertama kali
@@ -1179,7 +1202,7 @@ var app = {
                 
                 const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
                 const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
-                let todayRecord = this.mockData.riwayat.find(r => r.tanggal === tglString && r.nip === userInfo.nip);
+                let todayRecord = this.mockData.riwayat.find(r => r.tanggal === tglString && r.nip === (userInfo.username || userInfo.nip));
                 
                 let todayMasuk = '--:--';
                 let todayPulang = '--:--';
@@ -1196,9 +1219,9 @@ var app = {
                 const currentMonthStr = `/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
                 let myHadir = 0, myTerlambat = 0, myIzin = 0, mySakit = 0, myCuti = 0, myAlpa = 0;
                 this.mockData.riwayat.forEach(r => {
-                    if(r.nip === userInfo.nip && (r.tanggal || '').endsWith(currentMonthStr)) {
+                    if(r.nip === (userInfo.username || userInfo.nip) && (r.tanggal || '').endsWith(currentMonthStr)) {
                         const s = (r.status || '').toUpperCase();
-                        if(s === 'HADIR' || s === 'SELESAI') myHadir++;
+                        if(s === 'HADIR' || s === 'SELESAI' || s === 'DI LUAR LOKASI') myHadir++;
                         else if(s === 'TERLAMBAT') myTerlambat++;
                         else if(s === 'IZIN') myIzin++;
                         else if(s === 'SAKIT') mySakit++;
@@ -1628,7 +1651,7 @@ var app = {
                 const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
                 const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
                 
-                let todayRecord = this.mockData.riwayat.find(r => r.tanggal === tglString && r.nip === userInfo.nip);
+                let todayRecord = this.mockData.riwayat.find(r => r.tanggal === tglString && r.nip === (userInfo.username || userInfo.nip));
                 if (todayRecord) {
                     if (payload.tipe === 'Masuk') {
                         todayRecord.jamMasuk = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -1646,7 +1669,7 @@ var app = {
                 } else {
                     this.mockData.riwayat.unshift({
                         tanggal: tglString,
-                        nip: userInfo.nip || '-',
+                        nip: (userInfo.username || userInfo.nip) || '-',
                         namaGuru: userInfo.nama || 'Guru',
                         jamMasuk: payload.tipe === 'Masuk' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
                         jamPulang: payload.tipe === 'Pulang' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
@@ -2171,7 +2194,7 @@ var app = {
                 const filterMonthStr = `/${filterBulan.toString().padStart(2, '0')}/${filterTahun}`;
                 
                 const myRiwayat = this.mockData.riwayat
-                    .filter(r => r.nip === userInfo.nip && (r.tanggal || '').endsWith(filterMonthStr))
+                    .filter(r => r.nip === (userInfo.username || userInfo.nip) && (r.tanggal || '').endsWith(filterMonthStr))
                     .map(r => {
                         return {
                             tanggal: r.tanggal || '-',
@@ -2229,7 +2252,7 @@ var app = {
             this.mockData.riwayat.forEach(r => {
                 if(r.namaGuru === guru.nama && (r.tanggal || '').endsWith(filterMonthStr)) {
                     const stat = (r.status || '').toUpperCase();
-                    if(stat === 'HADIR' || stat === 'SELESAI') hadir++;
+                    if(stat === 'HADIR' || stat === 'SELESAI' || stat === 'DI LUAR LOKASI') hadir++;
                     else if(stat === 'TERLAMBAT') terlambat++;
                     else if(stat === 'IZIN') izin++;
                     else if(stat === 'SAKIT') sakit++;
@@ -3263,7 +3286,7 @@ var app = {
         const userInfo = JSON.parse(localStorage.getItem('user_info'));
         if(!this.mockData.jurnal) this.mockData.jurnal = [];
         
-        const myJurnal = this.mockData.jurnal.filter(j => j.nip === userInfo.nip).sort((a,b) => b.timestamp - a.timestamp);
+        const myJurnal = this.mockData.jurnal.filter(j => j.nip === (userInfo.username || userInfo.nip)).sort((a,b) => b.timestamp - a.timestamp);
         
         if (myJurnal.length === 0) {
             container.innerHTML = `<div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-center">
@@ -3298,7 +3321,7 @@ var app = {
             if (!userInfo) return;
             
             let data = [...(this.mockData.jurnal || [])]
-                .filter(j => j.nip === userInfo.nip)
+                .filter(j => j.nip === (userInfo.username || userInfo.nip))
                 .sort((a,b) => b.timestamp - a.timestamp);
                 
             if (data.length === 0) {
@@ -3348,7 +3371,7 @@ var app = {
                             <tr>
                                 <td style="padding: 2px 0;">NIP</td>
                                 <td>:</td>
-                                <td>${userInfo.nip || '-'}</td>
+                                <td>${(userInfo.username || userInfo.nip) || '-'}</td>
                             </tr>
                         </table>
                     </div>
@@ -3676,7 +3699,7 @@ var app = {
                 id: 'JRN' + Date.now(),
                 timestamp: Date.now(),
                 tanggal: tglString,
-                nip: userInfo.nip,
+                nip: (userInfo.username || userInfo.nip),
                 namaGuru: userInfo.nama,
                 kelas,
                 mapel,
@@ -3754,7 +3777,7 @@ var app = {
                     const newIzin = {
                         id: 'IZ' + Math.floor(Math.random()*10000),
                         timestamp: new Date().toISOString(),
-                        nip: userInfo.nip || '-',
+                        nip: (userInfo.username || userInfo.nip) || '-',
                         nama: userInfo.nama || 'Guru',
                         jenis: payload.jenis,
                         tglMulai: payload.tglMulai,
@@ -3886,7 +3909,7 @@ var app = {
             // MOCK
             setTimeout(() => {
                 const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
-                const myIzin = this.mockData.izinAdmin.filter(i => i.nip === userInfo.nip);
+                const myIzin = this.mockData.izinAdmin.filter(i => i.nip === (userInfo.username || userInfo.nip));
                 onSuccess({ success: true, data: myIzin });
             }, 800);
         
@@ -4805,10 +4828,13 @@ var app = {
                 <div class="p-4 flex-1 overflow-y-auto">
                     <div class="flex gap-2 mb-4">
                         <select id="filter-bulan" onchange="app.loadRiwayatGuru()" class="flex-1 bg-white border border-gray-200 rounded-lg p-2 text-sm text-gray-700 outline-none">
-                            <option value="1">Januari</option><option value="2">Februari</option><option value="3">Maret</option>
-                            <option value="4">April</option><option value="5">Mei</option><option value="6">Juni</option>
-                            <option value="7">Juli</option><option value="8">Agustus</option><option value="9" selected>September</option>
-                            <option value="10">Oktober</option><option value="11">November</option><option value="12">Desember</option>
+                            ${(() => {
+                                let opts = '';
+                                const m = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+                                const cur = new Date().getMonth() + 1;
+                                for(let i=1; i<=12; i++) opts += '<option value="'+i+'"'+(i===cur?' selected':'')+'>'+m[i-1]+'</option>';
+                                return opts;
+                            })()}
                         </select>
                         <select id="filter-tahun" onchange="app.loadRiwayatGuru()" class="w-24 bg-white border border-gray-200 rounded-lg p-2 text-sm text-gray-700 outline-none">
                             ${(() => {
@@ -5644,10 +5670,13 @@ var app = {
                             <div class="p-4 border-b border-gray-200 flex flex-wrap justify-between items-center bg-gray-50 rounded-t-xl gap-4">
                                 <div class="flex gap-3">
                                     <select id="admin-filter-bulan" onchange="app.loadRekapAdmin()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary bg-white min-w-[120px]">
-                                        <option value="1">Januari</option><option value="2">Februari</option><option value="3">Maret</option>
-                                        <option value="4">April</option><option value="5">Mei</option><option value="6">Juni</option>
-                                        <option value="7">Juli</option><option value="8">Agustus</option><option value="9" selected>September</option>
-                                        <option value="10">Oktober</option><option value="11">November</option><option value="12">Desember</option>
+                                        ${(() => {
+                                            let opts = '';
+                                            const m = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+                                            const cur = new Date().getMonth() + 1;
+                                            for(let i=1; i<=12; i++) opts += '<option value="'+i+'"'+(i===cur?' selected':'')+'>'+m[i-1]+'</option>';
+                                            return opts;
+                                        })()}
                                     </select>
                                     <select id="admin-filter-tahun" onchange="app.loadRekapAdmin()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary bg-white min-w-[100px]">
                                         ${(() => {
@@ -5707,10 +5736,13 @@ var app = {
                         <div class="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col">
                             <div class="p-4 border-b border-gray-200 flex flex-wrap items-center bg-gray-50 rounded-t-xl gap-3">
                                 <select id="admin-riwayat-bulan" onchange="app.loadRiwayatAdmin()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary bg-white min-w-[120px]">
-                                    <option value="1">Januari</option><option value="2">Februari</option><option value="3">Maret</option>
-                                    <option value="4">April</option><option value="5">Mei</option><option value="6">Juni</option>
-                                    <option value="7">Juli</option><option value="8">Agustus</option><option value="9" selected>September</option>
-                                    <option value="10">Oktober</option><option value="11">November</option><option value="12">Desember</option>
+                                    ${(() => {
+                                        let opts = '';
+                                        const m = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+                                        const cur = new Date().getMonth() + 1;
+                                        for(let i=1; i<=12; i++) opts += '<option value="'+i+'"'+(i===cur?' selected':'')+'>'+m[i-1]+'</option>';
+                                        return opts;
+                                    })()}
                                 </select>
                                 <select id="admin-riwayat-tahun" onchange="app.loadRiwayatAdmin()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary bg-white min-w-[100px]">
                                     ${(() => {
