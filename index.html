@@ -595,12 +595,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f"
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -1721,17 +1721,47 @@ var app = {
         this.renderHariLibur();
     },
 
-    switchPengaturanTab(tabId) {
-        ['identitas', 'kop-rekap', 'kop-slip', 'profil', 'libur'].forEach(id => {
-            document.getElementById(`pengaturan-tab-${id}`).classList.add('hidden');
-            document.getElementById(`tab-pengaturan-${id}`).classList.remove('text-primary', 'border-primary');
-            document.getElementById(`tab-pengaturan-${id}`).classList.add('text-gray-500', 'border-transparent');
-        });
-        
-        document.getElementById(`pengaturan-tab-${tabId}`).classList.remove('hidden');
-        document.getElementById(`tab-pengaturan-${tabId}`).classList.add('text-primary', 'border-primary');
-        document.getElementById(`tab-pengaturan-${tabId}`).classList.remove('text-gray-500', 'border-transparent');
+    resetDataBulanan() {
+        if(confirm("PERINGATAN: Apakah Anda yakin ingin MENGHAPUS SEMUA riwayat presensi dan foto?\nPastikan Anda sudah mendownload rekap (Excel/PDF) sebelum melanjutkan!\n\nData Guru TIDAK akan ikut terhapus.")) {
+            this.mockData.riwayat = [];
+            this.mockData.izin = [];
+            this.mockData.izinAdmin = [];
+            this.mockData.slipGaji = [];
+            
+            localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+            this.showToast('Data absen berhasil direset.', 'check_circle', 'text-green-400');
+            
+            try {
+                if (typeof db !== 'undefined') {
+                    db.collection('appData').doc('mainState').set(this.mockData);
+                }
+            } catch(e) {}
+        }
     },
+    
+    switchPengaturanTab(tabId) {
+        if(tabId === 'reset') {
+            document.querySelectorAll('.pengaturan-tab-content').forEach(el => el.classList.remove('block'));
+            document.querySelectorAll('.pengaturan-tab-content').forEach(el => el.classList.add('hidden'));
+            const tab = document.getElementById('pengaturan-tab-' + tabId);
+            if(tab) { tab.classList.remove('hidden'); tab.classList.add('block'); }
+            
+            // update tabs
+            const tabs = ['identitas', 'kop-rekap', 'kop-slip', 'profil', 'libur', 'reset'];
+            tabs.forEach(t => {
+                const el = document.getElementById('tab-pengaturan-' + t);
+                if(el) {
+                    if(t === tabId) {
+                        el.className = "px-4 py-3 font-medium text-sm text-primary border-b-2 border-primary transition";
+                        if(t === 'reset') el.className = "px-4 py-3 font-medium text-sm text-red-600 border-b-2 border-red-600 transition";
+                    } else {
+                        el.className = "px-4 py-3 font-medium text-sm text-gray-500 border-b-2 border-transparent hover:text-gray-700 transition";
+                        if(t === 'reset') el.className = "px-4 py-3 font-medium text-sm text-red-500 border-b-2 border-transparent hover:text-red-700 transition";
+                    }
+                }
+            });
+            return;
+        }
 
     renderHariLibur() {
         const tbody = document.getElementById('list-hari-libur');
@@ -4404,6 +4434,7 @@ var app = {
                                 <button onclick="app.switchPengaturanTab('kop-slip')" id="tab-pengaturan-kop-slip" class="px-4 py-3 font-medium text-sm text-gray-500 border-b-2 border-transparent hover:text-gray-700 transition">Kop Slip Gaji</button>
                                 <button onclick="app.switchPengaturanTab('profil')" id="tab-pengaturan-profil" class="px-4 py-3 font-medium text-sm text-gray-500 border-b-2 border-transparent hover:text-gray-700 transition">Profil Admin</button>
                                 <button onclick="app.switchPengaturanTab('libur')" id="tab-pengaturan-libur" class="px-4 py-3 font-medium text-sm text-gray-500 border-b-2 border-transparent hover:text-gray-700 transition">Hari Libur</button>
+                                <button onclick="app.switchPengaturanTab('reset')" id="tab-pengaturan-reset" class="px-4 py-3 font-medium text-sm text-red-500 border-b-2 border-transparent hover:text-red-700 transition">Reset Bulanan</button>
                             </div>
                             
                             <!-- TAB: IDENTITAS -->
