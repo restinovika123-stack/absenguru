@@ -595,12 +595,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f"
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -696,6 +696,13 @@ var app = {
                             else if (this.state.currentScreen === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
                             else if (this.state.currentScreen === 'admin-riwayat' && typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
                             else if (this.state.currentScreen === 'guru-riwayat' && typeof this.loadRiwayatGuru === 'function') this.loadRiwayatGuru();
+                            else if (this.state.currentScreen === 'admin-jurnal' && typeof this.loadJurnalAdmin === 'function') this.loadJurnalAdmin();
+                            else if (this.state.currentScreen === 'guru-jurnal' && typeof this.loadJurnalGuru === 'function') this.loadJurnalGuru();
+                            else if (this.state.currentScreen === 'admin-izin' && typeof this.loadIzinAdmin === 'function') this.loadIzinAdmin();
+                            else if (this.state.currentScreen === 'guru-izin' && typeof this.loadIzinGuru === 'function') this.loadIzinGuru();
+                            else if (this.state.currentScreen === 'admin-guru' && typeof this.loadDataGuru === 'function') this.loadDataGuru();
+                            else if (this.state.currentScreen === 'guru-slip-gaji' && typeof this.loadSlipGuru === 'function') this.loadSlipGuru();
+                            else if (this.state.currentScreen === 'admin-upload-slip' && typeof this.loadSlipAdmin === 'function') this.loadSlipAdmin();
                         }
                         
                         // Perbarui tampilan login jika data sekolah berubah
