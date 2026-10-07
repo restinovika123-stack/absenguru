@@ -595,12 +595,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f",
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -2462,10 +2462,29 @@ var app = {
     // ==========================================
     lihatFotoPresensi(url) {
         if (!url || url === '#' || url === 'null') {
-            this.showToast('Foto presensi tidak tersedia atau menggunakan Mock Data.', 'info', 'text-blue-400');
+            this.showToast('Foto presensi tidak tersedia.', 'info', 'text-blue-400');
             return;
         }
-        window.open(url, '_blank');
+        
+        // Buat modal dinamis untuk menampilkan foto tanpa diblokir popup browser
+        let modal = document.getElementById('dynamic-photo-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'dynamic-photo-modal';
+            modal.className = 'fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 backdrop-blur-sm';
+            modal.innerHTML = `
+                <div class="relative max-w-full max-h-full flex flex-col items-center">
+                    <button onclick="document.getElementById('dynamic-photo-modal').style.display='none'" class="absolute -top-12 right-0 text-white bg-gray-800/80 hover:bg-gray-700 rounded-full p-2 transition flex items-center justify-center">
+                        <span class="material-icons-round text-2xl">close</span>
+                    </button>
+                    <img id="dynamic-photo-img" src="" class="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain border border-gray-700">
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        document.getElementById('dynamic-photo-img').src = url;
+        modal.style.display = 'flex';
     },
 
     loadRiwayatAdmin() {
