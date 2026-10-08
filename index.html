@@ -4,6 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Presensi Guru</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#16a34a">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3358/3358172.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(err => {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+            });
+        }
+    </script>
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -595,12 +607,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f"
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -879,6 +891,17 @@ var app = {
     // ==========================================
     // NAVIGATION & LAYOUT
     // ==========================================
+    toggleSidebar() {
+        const activeScreen = document.querySelector('.screen.active');
+        if (!activeScreen) return;
+        const sidebar = activeScreen.querySelector('.admin-sidebar');
+        const overlay = activeScreen.querySelector('.admin-sidebar-overlay');
+        if (sidebar && overlay) {
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+    },
+
     navigate(screenId) {
         // Proteksi route (Frontend Check)
         if (screenId !== 'login') {
@@ -937,6 +960,17 @@ var app = {
             s.classList.remove('active');
             s.style.display = 'none';
         });
+
+        // Close sidebar if on mobile
+        const activeScreen = document.querySelector('.screen.active');
+        if (activeScreen) {
+            const sidebar = activeScreen.querySelector('.admin-sidebar');
+            const overlay = activeScreen.querySelector('.admin-sidebar-overlay');
+            if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+                sidebar.classList.add('-translate-x-full');
+                if (overlay) overlay.classList.add('hidden');
+            }
+        }
         
         // Show target screen
         const target = document.getElementById(`screen-${screenId}`);
@@ -5000,7 +5034,8 @@ var app = {
         
         // ADMIN TEMPLATES (Desktop layout)
         adminSidebar: () => `
-            <div class="w-64 bg-primary text-white flex flex-col h-full shrink-0">
+            <div onclick="app.toggleSidebar()" class="admin-sidebar-overlay fixed inset-0 bg-black/50 z-40 hidden lg:hidden"></div>
+            <div class="admin-sidebar fixed lg:relative inset-y-0 left-0 z-50 w-64 bg-primary text-white flex flex-col h-full shrink-0 transform -translate-x-full lg:translate-x-0 transition-transform duration-300">
                 <div class="p-5 flex items-center gap-3 border-b border-primary-light/30">
                     <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center shrink-0">
                         <span class="material-icons-round text-primary text-xl">school</span>
@@ -5049,7 +5084,7 @@ var app = {
         adminTopbar: (title) => `
             <div class="bg-white h-16 border-b border-gray-200 flex items-center justify-between px-6 shrink-0">
                 <div class="flex items-center gap-4">
-                    <span class="material-icons-round text-gray-500 cursor-pointer lg:hidden">menu</span>
+                    <span class="material-icons-round text-gray-500 cursor-pointer lg:hidden" onclick="app.toggleSidebar()">menu</span>
                     <h1 class="font-bold text-gray-800 text-lg">${title}</h1>
                 </div>
                 <div class="flex items-center gap-4">
