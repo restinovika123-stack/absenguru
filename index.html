@@ -273,7 +273,7 @@ input[type="file"]::file-selector-button:hover {
                 </div>
             </div>
             <div class="pb-6 text-center text-xs text-gray-400">
-                &copy; 2026 Presensi Guru by Resti Novika, M.Pd. G.r.
+                &copy; Presensi Guru by Resti Novika, M.Pd., Gr.
             </div>
         </div>
 
@@ -595,12 +595,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f"
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -1107,7 +1107,7 @@ var app = {
         
         // Update Profil Statis
         document.getElementById('guru-dashboard-nama').innerText = latestGuru.nama;
-        document.getElementById('guru-dashboard-nip').innerText = `NIP: ${latestGuru.username}`;
+        document.getElementById('guru-dashboard-nip').innerText = `NIP: ${(latestGuru.nip && latestGuru.nip !== '-') ? latestGuru.nip : '-'}`;
         
         // Sync Pengumuman
         const pengumumanContainer = document.getElementById('guru-dashboard-pengumuman-container');
@@ -1690,6 +1690,7 @@ var app = {
                 
                 // Simpan perubahan ke localStorage
                 localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
                 
                 onSuccess({ success: true, message: `Mock: Presensi ${payload.tipe} berhasil dikirim!` });
             }, 1500);
@@ -1757,6 +1758,7 @@ var app = {
             this.mockData.izin = [];
             this.mockData.izinAdmin = [];
             this.mockData.slipGaji = [];
+            this.mockData.jurnal = [];
             
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
             this.showToast('Data absen berhasil direset.', 'check_circle', 'text-green-400');
@@ -2596,12 +2598,30 @@ var app = {
         };
 
         // LOGIKA DINAMIS RIWAYAT
-        const dataRiwayat = this.mockData.riwayat.map(r => {
-            // Coba cari NIP dari data guru jika tidak tersimpan di riwayat
+        const filterMonthStr = `/${filterBulan.toString().padStart(2, '0')}/${filterTahun}`;
+        
+        let filteredRiwayat = this.mockData.riwayat;
+        
+        if (filterBulan && filterTahun) {
+            filteredRiwayat = filteredRiwayat.filter(r => (r.tanggal || '').endsWith(filterMonthStr));
+        }
+        if (filterStatus) {
+            filteredRiwayat = filteredRiwayat.filter(r => (r.status || '').toUpperCase().includes(filterStatus.toUpperCase()));
+        }
+        if (filterGuru) {
+            const fg = filterGuru.toLowerCase();
+            filteredRiwayat = filteredRiwayat.filter(r => 
+                (r.namaGuru && r.namaGuru.toLowerCase().includes(fg)) || 
+                (r.nip && r.nip.toLowerCase().includes(fg))
+            );
+        }
+
+        const dataRiwayat = filteredRiwayat.map(r => {
+            // Coba cari NIP aktual dari data guru
             let nip = r.nip || '-';
-            if (nip === '-') {
-                const guru = this.mockData.dataGuru.find(g => g.nama === r.namaGuru);
-                if (guru && guru.nip) nip = guru.nip;
+            const guruInfo = this.mockData.dataGuru.find(g => g.username === r.nip || g.nip === r.nip || g.nama === r.namaGuru);
+            if (guruInfo) {
+                nip = (guruInfo.nip && guruInfo.nip !== '-') ? guruInfo.nip : '-';
             }
             return {
                 tanggal: r.tanggal,
@@ -2657,14 +2677,20 @@ var app = {
                     }
 
                     const lampiranHtml = item.lampiranUrl 
-                        ? `<a href="${item.lampiranUrl}" target="_blank" class="text-blue-500 hover:underline text-xs flex items-center justify-center gap-1"><span class="material-icons-round text-[14px]">attachment</span> Buka</a>` 
+                        ? `<button onclick="app.lihatFotoPresensi('${item.lampiranUrl}')" class="text-blue-500 hover:underline text-xs flex items-center justify-center gap-1"><span class="material-icons-round text-[14px]">attachment</span> Buka</button>` 
                         : '<span class="text-gray-400 text-xs">-</span>';
+
+                    let nipDisplay = item.nip || '-';
+                    const guruInfo = this.mockData.dataGuru.find(g => g.username === item.nip || g.nip === item.nip || g.nama === item.nama);
+                    if (guruInfo) {
+                        nipDisplay = (guruInfo.nip && guruInfo.nip !== '-') ? guruInfo.nip : '-';
+                    }
 
                     html += `
                         <tr class="hover:bg-gray-50 border-b border-gray-100 text-sm">
                             <td class="text-center p-3">${index + 1}</td>
                             <td class="p-3 text-xs whitespace-nowrap">${new Date(item.timestamp).toLocaleString('id-ID')}</td>
-                            <td class="p-3 font-medium whitespace-nowrap">${item.nip}<br><span class="text-xs text-gray-500 font-normal">${item.nama}</span></td>
+                            <td class="p-3 font-medium whitespace-nowrap">${nipDisplay}<br><span class="text-xs text-gray-500 font-normal">${item.nama}</span></td>
                             <td class="p-3 font-semibold">${item.jenis}</td>
                             <td class="p-3 text-xs whitespace-nowrap">${item.tglMulai}<br>s/d<br>${item.tglSelesai}</td>
                             <td class="p-3 text-xs max-w-[200px] truncate" title="${item.alasan}">${item.alasan}</td>
@@ -3313,7 +3339,7 @@ var app = {
                     </div>
                     <h4 class="font-bold text-gray-800 text-sm mb-1">${j.mapel}</h4>
                     <p class="text-xs text-gray-600 mb-3 line-clamp-2">${j.materi}</p>
-                    ${j.foto ? `<img src="${j.foto}" class="w-full h-32 object-cover rounded-lg border border-gray-100 cursor-pointer" onclick="window.open('${j.foto}', '_blank')">` : ''}
+                    ${j.foto ? `<img src="${j.foto}" class="w-full h-32 object-cover rounded-lg border border-gray-100 cursor-pointer" onclick="app.lihatFotoPresensi('${j.foto}')">` : ''}
                 </div>
             `;
         });
@@ -3486,13 +3512,18 @@ var app = {
 
         let html = '';
         data.forEach((j, index) => {
+            let nipDisplay = j.nip || '-';
+            const guruInfo = this.mockData.dataGuru.find(g => g.username === j.nip || g.nip === j.nip || g.nama === j.namaGuru);
+            if (guruInfo) {
+                nipDisplay = (guruInfo.nip && guruInfo.nip !== '-') ? guruInfo.nip : '-';
+            }
             html += `
                 <tr class="hover:bg-gray-50 transition border-b border-gray-100 last:border-b-0">
                     <td class="p-4 text-center text-sm text-gray-600">${index + 1}</td>
                     <td class="p-4 text-sm text-gray-700 whitespace-nowrap"><span class="flex items-center gap-1"><span class="material-icons-round text-[14px] text-gray-400">calendar_today</span> ${j.tanggal}</span></td>
                     <td class="p-4">
                         <div class="font-bold text-gray-800 text-sm">${j.namaGuru}</div>
-                        <div class="text-xs text-gray-500">NIP: ${j.nip}</div>
+                        <div class="text-xs text-gray-500">NIP: ${nipDisplay}</div>
                     </td>
                     <td class="p-4">
                         <div class="text-xs font-semibold bg-blue-50 text-blue-700 px-2 py-1 rounded inline-block mb-1 border border-blue-100">Kelas: ${j.kelas}</div>
@@ -3503,7 +3534,7 @@ var app = {
                         <p class="leading-relaxed line-clamp-3" title="${j.materi}">${j.materi}</p>
                     </td>
                     <td class="p-4 text-center">
-                        ${j.foto ? `<img src="${j.foto}" class="w-16 h-12 object-cover rounded border border-gray-200 cursor-pointer mx-auto shadow-sm hover:scale-110 transition" onclick="window.open('${j.foto}', '_blank')">` : '<div class="w-16 h-12 bg-gray-100 rounded flex items-center justify-center mx-auto border border-gray-200"><span class="material-icons-round text-gray-300 text-lg">image_not_supported</span></div>'}
+                        ${j.foto ? `<img src="${j.foto}" class="w-16 h-12 object-cover rounded border border-gray-200 cursor-pointer mx-auto shadow-sm hover:scale-110 transition" onclick="app.lihatFotoPresensi('${j.foto}')">` : '<div class="w-16 h-12 bg-gray-100 rounded flex items-center justify-center mx-auto border border-gray-200"><span class="material-icons-round text-gray-300 text-lg">image_not_supported</span></div>'}
                     </td>
                 </tr>
             `;
@@ -3715,7 +3746,7 @@ var app = {
             });
             
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
-            
+            try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
             setTimeout(() => {
                 btn.innerHTML = ogText;
                 btn.disabled = false;
@@ -3796,6 +3827,7 @@ var app = {
                     };
                     this.mockData.izinAdmin.unshift(newIzin);
                     localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                    try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
                     onSuccess({ success: true });
                 }, 1000);
             
@@ -3847,7 +3879,7 @@ var app = {
             const lampiranEl = document.getElementById('detail-izin-lampiran');
             if(item.lampiranUrl) {
                 lampiranContainer.classList.remove('hidden');
-                lampiranEl.onclick = () => window.open(item.lampiranUrl, '_blank');
+                lampiranEl.onclick = () => app.lihatFotoPresensi(item.lampiranUrl);
             } else {
                 lampiranContainer.classList.add('hidden');
             }
@@ -4810,7 +4842,7 @@ var app = {
                                 <div class="bg-red-50 p-6 rounded-xl border border-red-200 max-w-2xl mx-auto text-center mt-4">
                                     <span class="material-icons-round text-red-500 text-5xl mb-4 block">warning</span>
                                     <h3 class="text-xl font-bold text-red-700 mb-2">Reset Data Bulanan (Kosongkan Absen)</h3>
-                                    <p class="text-sm text-red-600 mb-6">Tindakan ini akan menghapus <strong>seluruh data riwayat presensi, foto absen, permohonan izin, dan slip gaji</strong> bulan ini agar database Anda tidak penuh. <br><br>Profil Admin, Pengaturan Sekolah, dan Data Guru <strong>TIDAK AKAN DIHAPUS</strong>.</p>
+                                    <p class="text-sm text-red-600 mb-6">Tindakan ini akan menghapus <strong>seluruh data riwayat presensi, foto absen, permohonan izin, jurnal mengajar, dan slip gaji</strong> bulan ini agar database Anda tidak penuh. <br><br>Profil Admin, Pengaturan Sekolah, dan Data Guru <strong>TIDAK AKAN DIHAPUS</strong>.</p>
                                     
                                     <button onclick="app.resetDataBulanan()" class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold shadow-md transition transform active:scale-95 flex items-center justify-center gap-2 mx-auto">
                                         <span class="material-icons-round text-[20px]">delete_forever</span> Kosongkan Data Absen Sekarang
