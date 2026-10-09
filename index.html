@@ -4,9 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Presensi Guru</title>
+    
+    <!-- Ikon di Tab Browser & Perangkat Apple -->
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="shortcut icon" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    
+    <!-- Gambar untuk Preview Link (Open Graph / WhatsApp / FB) -->
+    <meta property="og:title" content="Presensi Guru">
+    <meta property="og:description" content="Aplikasi Kehadiran Guru SDN 1 NATAR">
+    <meta property="og:image" content="logo.png">
+    <meta property="og:type" content="website">
+
+    <!-- Gambar untuk Preview Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="logo.png">
+
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#16a34a">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3358/3358172.png">
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -366,19 +381,6 @@ input[type="file"]::file-selector-button:hover {
                     </div>
                 </div>
 
-                <!-- Jurnal Mengajar -->
-                <div class="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-4 shadow-sm mb-6 text-white flex items-center justify-between cursor-pointer hover:shadow-md transition" onclick="app.navigate('guru-jurnal')">
-                    <div class="flex items-center gap-3">
-                        <div class="bg-white/20 p-2 rounded-lg">
-                            <span class="material-icons-round">menu_book</span>
-                        </div>
-                        <div>
-                            <h4 class="font-bold text-sm">Jurnal Mengajar</h4>
-                            <p class="text-xs text-blue-100">Isi logbook kegiatan harian</p>
-                        </div>
-                    </div>
-                    <span class="material-icons-round">chevron_right</span>
-                </div>
 
                 <!-- Statistik -->
                 <h4 class="text-sm font-bold text-gray-800 mb-3">Statistik Kehadiran Bulan Ini</h4>
@@ -435,6 +437,10 @@ input[type="file"]::file-selector-button:hover {
                 <button onclick="app.navigate('guru-izin')" class="flex-1 flex flex-col items-center p-2 text-gray-400 hover:text-primary transition">
                     <span class="material-icons-round">assignment</span>
                     <span class="text-[10px] font-medium mt-1">Izin/Cuti</span>
+                </button>
+                <button onclick="app.navigate('guru-jurnal')" class="flex-1 flex flex-col items-center p-2 text-gray-400 hover:text-primary transition">
+                    <span class="material-icons-round">menu_book</span>
+                    <span class="text-[10px] font-medium mt-1">Jurnal</span>
                 </button>
                 <button onclick="app.navigate('guru-slip-gaji')" class="flex-1 flex flex-col items-center p-2 text-gray-400 hover:text-primary transition">
                     <span class="material-icons-round">request_quote</span>
@@ -607,12 +613,12 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
-            authDomain: "absensiguru-268d9.firebaseapp.com",
-            projectId: "absensiguru-268d9",
-            storageBucket: "absensiguru-268d9.firebasestorage.app",
-            messagingSenderId: "1014685328974",
-            appId: "1:1014685328974:web:031c9d916a8b3605ca051f"
+            apiKey: "AIzaSyD2TJSmdutF9lIdoNMAPrIQWfvtTZSIEsM",
+            authDomain: "absenguru-app.firebaseapp.com",
+            projectId: "absenguru-app",
+            storageBucket: "absenguru-app.firebasestorage.app",
+            messagingSenderId: "82036681140",
+            appId: "1:82036681140:web:153d9364bfdfcbd97eeae1"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -790,6 +796,7 @@ var app = {
         const userStr = localStorage.getItem('user_info');
         if (token && userStr) {
             const user = JSON.parse(userStr);
+            this.state.currentUser = user;
             if (user.role === 'ADMIN') {
                 this.navigate('admin-dashboard');
             } else {
@@ -1299,6 +1306,28 @@ var app = {
     },
 
     bukaPresensi(tipe) {
+        // Cek status hari ini
+        const waktuMasuk = document.getElementById('guru-dashboard-masuk').innerText.trim();
+        const waktuPulang = document.getElementById('guru-dashboard-pulang').innerText.trim();
+
+        if (waktuMasuk === '--:--' || waktuMasuk === '') {
+            // Belum masuk
+            if (tipe === 'Pulang') {
+                this.showToast('Anda belum presensi masuk. Mengalihkan ke presensi masuk.', 'info', 'text-blue-400');
+            }
+            tipe = 'Masuk';
+        } else if (waktuPulang === '--:--' || waktuPulang === '') {
+            // Sudah masuk, belum pulang
+            if (tipe === 'Masuk') {
+                this.showToast('Anda sudah presensi masuk. Mengalihkan ke presensi keluar.', 'info', 'text-blue-400');
+            }
+            tipe = 'Pulang';
+        } else {
+            // Sudah presensi masuk dan pulang
+            this.showToast('Anda sudah melakukan presensi masuk dan keluar hari ini. Jika ada kesalahan, gunakan pengajuan koreksi.', 'error', 'text-red-400');
+            return;
+        }
+
         this.presensiState.tipe = tipe;
         document.getElementById('presensi-title').innerText = `Presensi ${tipe}`;
         this.navigate('guru-presensi');
@@ -1351,6 +1380,22 @@ var app = {
                 const lng = position.coords.longitude;
                 const acc = position.coords.accuracy;
                 
+                // Deteksi Fake GPS
+                let isFakeGPS = false;
+                if (position.mocked || (position.coords && position.coords.mocked)) {
+                    isFakeGPS = true;
+                }
+                // Heuristik tambahan: tidak ada device asli yang akurasinya 0
+                if (acc === 0) {
+                    isFakeGPS = true;
+                }
+
+                if (isFakeGPS) {
+                    this.showGPSError('Terdeteksi penggunaan Fake GPS. Harap matikan dan coba lagi.');
+                    this.showToast('Fake GPS Terdeteksi!', 'error', 'text-red-400');
+                    return;
+                }
+
                 this.presensiState.lat = lat;
                 this.presensiState.lng = lng;
                 this.presensiState.acc = acc;
@@ -1523,7 +1568,11 @@ var app = {
         let isPulangCepat = false;
 
         // Ambil profil guru untuk mengecek shift
-        const currentUser = this.state.currentUser;
+        const currentUser = this.state.currentUser || JSON.parse(localStorage.getItem('user_info') || '{}');
+        if (!currentUser || !currentUser.id) {
+            this.showToast('Gagal memuat profil pengguna. Silakan login ulang.', 'error', 'text-red-400');
+            return;
+        }
         const guruProfile = this.mockData.dataGuru.find(g => g.id === currentUser.id);
         const shiftGuru = guruProfile ? (guruProfile.shift || 'Pagi') : 'Pagi';
 
@@ -4066,7 +4115,7 @@ var app = {
             html += `
                 <tr class="hover:bg-gray-50 transition border-b border-gray-100 last:border-b-0">
                     <td class="text-center p-3 text-sm">${i + 1}</td>
-                    <td class="p-3"><img src="${g.img || `https://ui-avatars.com/api/?name=${g.nama.replace(/ /g,'+')}&background=random&color=fff`}" class="w-10 h-10 rounded-full border border-gray-200 object-cover shadow-sm"></td>
+                    <td class="p-3"><img src="${g.fotoUrl || g.img || `https://ui-avatars.com/api/?name=${g.nama.replace(/ /g,'+')}&background=random&color=fff`}" class="w-10 h-10 rounded-full border border-gray-200 object-cover shadow-sm"></td>
                     <td class="p-3 text-sm font-semibold text-gray-700">${g.id}</td>
                     <td class="p-3 text-sm text-gray-600">${g.nip || '-'}</td>
                     <td class="p-3 text-sm font-bold text-gray-800">${g.nama}</td>
