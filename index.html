@@ -614,7 +614,7 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
+            apiKey: "AIzaSyDL2IQTkYxcRl4XmEoOgf76CVVbj9qr6z0",
             authDomain: "absensiguru-268d9.firebaseapp.com",
             projectId: "absensiguru-268d9",
             storageBucket: "absensiguru-268d9.firebasestorage.app",
@@ -749,6 +749,128 @@ var app = {
             }, (error) => {
                 console.error("Gagal mendengarkan Firebase:", error);
             });
+
+            // TAHAP 1: Mendengarkan koleksi presensi_guru yang baru
+            db.collection('presensi_guru').onSnapshot((snapshot) => {
+                let koleksiRiwayat = [];
+                snapshot.forEach(doc => koleksiRiwayat.push(doc.data()));
+                
+                // Ambil riwayat lama dari mainState (sebagai arsip)
+                let riwayatLama = this.mockData.riwayatLamaMainState || this.mockData.riwayat || [];
+                if (!this.mockData.riwayatLamaMainState) this.mockData.riwayatLamaMainState = riwayatLama;
+                
+                // Gabungkan dan hilangkan duplikat (koleksi baru menimpa yang lama jika ada overlap)
+                let map = new Map();
+                riwayatLama.forEach(r => map.set(r.tanggal + '_' + r.nip, r));
+                koleksiRiwayat.forEach(r => map.set(r.tanggal + '_' + r.nip, r));
+                
+                // Urutkan berdasarkan tanggal terbaru di atas
+                this.mockData.riwayat = Array.from(map.values()).sort((a,b) => {
+                    let dateA = a.tanggal.split('/').reverse().join('');
+                    let dateB = b.tanggal.split('/').reverse().join('');
+                    return dateB.localeCompare(dateA);
+                });
+                
+                // Simpan ke lokal agar tetap responsif saat direfresh
+                localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                
+                // Refresh tampilan jika admin sedang membuka halaman rekap
+                if (this.state) {
+                    if (this.state.currentScreen === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
+                    if (this.state.currentScreen === 'admin-riwayat' && typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
+                    if (this.state.currentScreen === 'guru-riwayat' && typeof this.loadRiwayatGuru === 'function') this.loadRiwayatGuru();
+                    if (this.state.currentScreen === 'guru-dashboard' && typeof this.loadDashboardGuruData === 'function' && this.state.currentUser) this.loadDashboardGuruData(this.state.currentUser);
+                }
+            });
+
+            // TAHAP 2: Mendengarkan koleksi data_guru yang baru
+            db.collection('data_guru').onSnapshot((snapshot) => {
+                let koleksiGuru = [];
+                snapshot.forEach(doc => koleksiGuru.push(doc.data()));
+                
+                let guruLama = this.mockData.dataGuruLamaMainState || this.mockData.dataGuru || [];
+                if (!this.mockData.dataGuruLamaMainState) this.mockData.dataGuruLamaMainState = guruLama;
+                
+                let map = new Map();
+                guruLama.forEach(g => map.set(g.id, g));
+                koleksiGuru.forEach(g => {
+                     if (g.isDeleted) map.delete(g.id);
+                     else map.set(g.id, g);
+                });
+                
+                this.mockData.dataGuru = Array.from(map.values()).sort((a,b) => {
+                    return (a.nama || '').localeCompare(b.nama || '');
+                });
+                
+                localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                
+                if (this.state && this.state.currentScreen === 'admin-guru' && typeof this.renderDataGuru === 'function') {
+                    this.renderDataGuru();
+                }
+            });
+
+            // TAHAP 2: Mendengarkan koleksi pengaturan
+            db.collection('pengaturan').doc('sekolah').onSnapshot((doc) => {
+                if (doc.exists) {
+                    this.mockData.schoolSettings = { ...this.mockData.schoolSettings, ...doc.data() };
+                    localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                    
+                    if (this.state && this.state.currentScreen === 'admin-pengaturan' && typeof this.renderPengaturan === 'function') {
+                        this.renderPengaturan();
+                    }
+                }
+            });
+
+            // TAHAP 3: Mendengarkan koleksi izin_guru
+            db.collection('izin_guru').onSnapshot((snapshot) => {
+                let koleksi = [];
+                snapshot.forEach(doc => koleksi.push(doc.data()));
+                let lama = this.mockData.izinLamaMainState || this.mockData.izinAdmin || [];
+                if (!this.mockData.izinLamaMainState) this.mockData.izinLamaMainState = lama;
+                let map = new Map();
+                lama.forEach(d => map.set(d.id, d));
+                koleksi.forEach(d => { if (d.isDeleted) map.delete(d.id); else map.set(d.id, d); });
+                this.mockData.izinAdmin = Array.from(map.values()).sort((a,b) => b.timestamp - a.timestamp);
+                localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                if (this.state) {
+                    if (this.state.currentScreen === 'admin-izin' && typeof this.renderDataIzin === 'function') this.renderDataIzin();
+                    if (this.state.currentScreen === 'guru-izin' && typeof this.loadIzinGuru === 'function') this.loadIzinGuru();
+                }
+            });
+
+            // TAHAP 3: Mendengarkan koleksi jurnal_guru
+            db.collection('jurnal_guru').onSnapshot((snapshot) => {
+                let koleksi = [];
+                snapshot.forEach(doc => koleksi.push(doc.data()));
+                let lama = this.mockData.jurnalLamaMainState || this.mockData.jurnal || [];
+                if (!this.mockData.jurnalLamaMainState) this.mockData.jurnalLamaMainState = lama;
+                let map = new Map();
+                lama.forEach(d => map.set(d.id, d));
+                koleksi.forEach(d => { if (d.isDeleted) map.delete(d.id); else map.set(d.id, d); });
+                this.mockData.jurnal = Array.from(map.values()).sort((a,b) => b.timestamp - a.timestamp);
+                localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                if (this.state) {
+                    if (this.state.currentScreen === 'admin-jurnal' && typeof this.loadJurnalAdmin === 'function') this.loadJurnalAdmin();
+                    if (this.state.currentScreen === 'guru-jurnal' && typeof this.loadJurnalGuru === 'function') this.loadJurnalGuru();
+                }
+            });
+
+            // TAHAP 3: Mendengarkan koleksi slip_gaji
+            db.collection('slip_gaji').onSnapshot((snapshot) => {
+                let koleksi = [];
+                snapshot.forEach(doc => koleksi.push(doc.data()));
+                let lama = this.mockData.slipLamaMainState || this.mockData.slipGaji || [];
+                if (!this.mockData.slipLamaMainState) this.mockData.slipLamaMainState = lama;
+                let map = new Map();
+                lama.forEach(d => map.set(d.id, d));
+                koleksi.forEach(d => { if (d.isDeleted) map.delete(d.id); else map.set(d.id, d); });
+                this.mockData.slipGaji = Array.from(map.values()).sort((a,b) => b.timestamp - a.timestamp);
+                localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                if (this.state) {
+                    if (this.state.currentScreen === 'admin-slip' && typeof this.renderDataSlip === 'function') this.renderDataSlip();
+                }
+            });
+
         } catch (e) {
             console.error("Firebase tidak terinisialisasi dengan benar", e);
         }
@@ -762,9 +884,27 @@ var app = {
             if (currentDataString !== lastSavedDataString) {
                 localStorage.setItem('absenguru_app_data', currentDataString);
                 
+                // Hapus data yang sudah memiliki koleksi sendiri agar tidak memperbesar mainState
+                let dataToSave = JSON.parse(currentDataString);
+                delete dataToSave.riwayat;
+                delete dataToSave.riwayatLamaMainState;
+                delete dataToSave.dataGuru;
+                delete dataToSave.dataGuruLamaMainState;
+                delete dataToSave.schoolSettings;
+                
+                // TAHAP 3: Hapus data yang sudah memiliki koleksi sendiri
+                delete dataToSave.izinAdmin;
+                delete dataToSave.izinLamaMainState;
+                delete dataToSave.izin;
+                delete dataToSave.jurnal;
+                delete dataToSave.jurnalLamaMainState;
+                delete dataToSave.slipGaji;
+                delete dataToSave.slipLamaMainState;
+
+                
                 // Simpan ke Firebase hanya jika ada perubahan di memori kita
                 try {
-                    db.collection('appData').doc('mainState').set(this.mockData, { merge: true })
+                    db.collection('appData').doc('mainState').set(dataToSave, { merge: true })
                         .catch(e => console.error("Gagal simpan ke Firebase", e));
                 } catch (e) {}
                 
@@ -1737,75 +1877,61 @@ var app = {
 
         
             // MOCK LOGIC LOCALHOST
-            // LOGIC MENGGUNAKAN TRANSACTION FIRESTORE (Mencegah Race Condition)
+            // TAHAP 1: ARSITEKTUR KOLEKSI TERPISAH (TANPA ANTRIAN)
             setTimeout(async () => {
                 const now = new Date();
                 const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
                 const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
-                const usernameOrNip = userInfo.username || userInfo.nip || '-';
-                const namaGuru = userInfo.nama || 'Guru';
                 
-                const processData = (dataToProcess) => {
-                    let todayRecord = dataToProcess.riwayat.find(r => r.tanggal === tglString && r.nip === usernameOrNip);
-                    if (todayRecord) {
-                        if (payload.tipe === 'Masuk') {
-                            todayRecord.jamMasuk = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                            todayRecord.fotoMasuk = payload.foto;
-                            todayRecord.jarakMasuk = payload.jarak;
-                            todayRecord.status = payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi');
-                        } else if (payload.tipe === 'Pulang') {
-                            todayRecord.jamPulang = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                            todayRecord.fotoPulang = payload.foto;
-                            todayRecord.jarakPulang = payload.jarak;
-                            if(todayRecord.status !== 'Terlambat' && todayRecord.status !== 'Di Luar Lokasi') {
-                                 todayRecord.status = 'Selesai';
-                            }
-                        }
-                    } else {
-                        dataToProcess.riwayat.unshift({
-                            tanggal: tglString,
-                            nip: usernameOrNip,
-                            namaGuru: namaGuru,
-                            jamMasuk: payload.tipe === 'Masuk' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
-                            jamPulang: payload.tipe === 'Pulang' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
-                            jarakMasuk: payload.tipe === 'Masuk' ? payload.jarak : null,
-                            jarakPulang: payload.tipe === 'Pulang' ? payload.jarak : null,
-                            status: payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi'),
-                            fotoMasuk: payload.tipe === 'Masuk' ? payload.foto : '',
-                            fotoPulang: payload.tipe === 'Pulang' ? payload.foto : ''
-                        });
-                    }
-                    return dataToProcess;
-                };
+                // Format ID Unik per Guru per Hari (Misal: 20261011_GURU001)
+                const docId = `${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${userInfo.username || userInfo.nip || 'anon'}`;
 
                 try {
                     if (typeof db !== 'undefined') {
-                        const docRef = db.collection('appData').doc('mainState');
-                        await db.runTransaction(async (transaction) => {
-                            const doc = await transaction.get(docRef);
-                            let latestData = doc.exists ? doc.data() : JSON.parse(JSON.stringify(this.mockData));
-                            
-                            // Pastikan array riwayat ada
-                            if (!latestData.riwayat) latestData.riwayat = [];
-                            
-                            latestData = processData(latestData);
-                            transaction.set(docRef, latestData, { merge: true });
-                            this.mockData = latestData; // update state lokal
-                        });
-                        localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                        // 1. Ambil kertas absen milik guru ini hari ini (Sangat cepat karena spesifik 1 dokumen)
+                        const docRef = db.collection('presensi_guru').doc(docId);
+                        const docSnap = await docRef.get();
+                        
+                        let record = docSnap.exists ? docSnap.data() : {
+                            tanggal: tglString,
+                            nip: userInfo.username || userInfo.nip || '-',
+                            namaGuru: userInfo.nama || 'Guru',
+                            jamMasuk: '--:--',
+                            jamPulang: '--:--',
+                            jarakMasuk: null,
+                            jarakPulang: null,
+                            status: 'Alpa',
+                            fotoMasuk: '',
+                            fotoPulang: ''
+                        };
+
+                        // 2. Perbarui data sesuai tipe presensi
+                        if (payload.tipe === 'Masuk') {
+                            record.jamMasuk = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+                            record.fotoMasuk = payload.foto;
+                            record.jarakMasuk = payload.jarak;
+                            record.status = payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi');
+                        } else if (payload.tipe === 'Pulang') {
+                            record.jamPulang = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+                            record.fotoPulang = payload.foto;
+                            record.jarakPulang = payload.jarak;
+                            if(record.status !== 'Terlambat' && record.status !== 'Di Luar Lokasi') {
+                                 record.status = 'Selesai';
+                            }
+                        }
+
+                        // 3. Tulis ulang langsung ke koleksi terpisah (10.000 writes/detik aman, tanpa antrean)
+                        await docRef.set(record, { merge: true });
                         onSuccess({ success: true, message: `Presensi ${payload.tipe} berhasil dikirim!` });
-                        return; // Selesai jika transaksi sukses
+                        return;
+                    } else {
+                        throw new Error("Database offline");
                     }
                 } catch (e) {
-                    console.warn("Transaksi Firebase gagal, menggunakan fallback lokal", e);
+                    console.error("Gagal mengirim presensi:", e);
+                    onError({ message: 'Gagal terhubung ke server. Pastikan internet stabil.' });
                 }
-
-                // Fallback jika tidak ada koneksi / transaksi gagal
-                this.mockData = processData(this.mockData);
-                localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
-                try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
-                onSuccess({ success: true, message: `Presensi ${payload.tipe} berhasil dikirim (Lokal)!` });
-            }, 500);
+            }, 50);
         
     },
 
@@ -1865,21 +1991,48 @@ var app = {
     },
 
     resetDataBulanan() {
-        if(confirm("PERINGATAN: Apakah Anda yakin ingin MENGHAPUS SEMUA riwayat presensi dan foto?\nPastikan Anda sudah mendownload rekap (Excel/PDF) sebelum melanjutkan!\n\nData Guru TIDAK akan ikut terhapus.")) {
+        if(confirm("PERINGATAN KRITIKAL: Apakah Anda yakin ingin MENGHAPUS SEMUA riwayat presensi, izin, jurnal, dan slip gaji secara permanen dari server?\nPastikan Anda sudah mendownload rekap (Excel/PDF) bulan ini sebelum melanjutkan!\n\nData Guru dan Pengaturan TIDAK akan ikut terhapus.")) {
+            
+            this.showToast('Memproses penghapusan data di server...', 'sync', 'text-blue-400');
+            
+            // Hapus dari memori lokal
             this.mockData.riwayat = [];
             this.mockData.izin = [];
             this.mockData.izinAdmin = [];
             this.mockData.slipGaji = [];
             this.mockData.jurnal = [];
-            
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
-            this.showToast('Data absen berhasil direset.', 'check_circle', 'text-green-400');
             
+            // Hapus dari mainState
             try {
                 if (typeof db !== 'undefined') {
                     db.collection('appData').doc('mainState').set(this.mockData);
                 }
             } catch(e) {}
+            
+            // Fungsi helper untuk menghapus semua isi koleksi
+            const clearCollection = (collectionName) => {
+                try {
+                    if (typeof db !== 'undefined') {
+                        db.collection(collectionName).get().then(snapshot => {
+                            snapshot.forEach(doc => {
+                                doc.ref.delete().catch(e => console.log('Gagal hapus doc', e));
+                            });
+                        }).catch(e => console.log('Gagal fetch koleksi', e));
+                    }
+                } catch(e) {}
+            };
+            
+            // Eksekusi penghapusan di koleksi Firebase yang baru (Tahap 1 & 3)
+            clearCollection('presensi_guru');
+            clearCollection('izin_guru');
+            clearCollection('jurnal_guru');
+            clearCollection('slip_gaji');
+            
+            setTimeout(() => {
+                this.showToast('Data bulanan berhasil direset dari server!', 'check_circle', 'text-green-400');
+                if (this.state.currentScreen === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
+            }, 2000);
         }
     },
     
@@ -1959,6 +2112,10 @@ var app = {
 
         this.mockData.schoolSettings.hariLibur.push(formattedDate);
         localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+        
+        // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+        try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
+        
         this.renderHariLibur();
         input.value = '';
         this.showToast('Hari libur berhasil ditambahkan', 'check_circle', 'text-green-400');
@@ -1968,6 +2125,10 @@ var app = {
         if (confirm('Yakin ingin menghapus tanggal libur ini?')) {
             this.mockData.schoolSettings.hariLibur.splice(index, 1);
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+            
+            // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+            try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
+            
             this.renderHariLibur();
             this.showToast('Hari libur dihapus', 'check_circle', 'text-green-400');
         }
@@ -2009,6 +2170,8 @@ var app = {
                     document.getElementById('preview-logo-sekolah').src = e.target.result;
                     this.mockData.schoolSettings.logoSekolahUrl = e.target.result;
                     this.updatePreviewKop();
+                    // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+                    try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
                 } else if (type === 'kabkota') {
                     const preview = document.getElementById('preview-logo-kabkota');
                     preview.src = e.target.result;
@@ -2016,6 +2179,8 @@ var app = {
                     document.getElementById('placeholder-logo-kabkota').classList.add('hidden');
                     this.mockData.schoolSettings.logoKabKotaUrl = e.target.result;
                     this.updatePreviewKop();
+                    // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+                    try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
                 } else if (type === 'admin') {
                     document.getElementById('set-admin-foto').src = e.target.result;
                 }
@@ -2141,7 +2306,12 @@ var app = {
 
         const token = localStorage.getItem('session_token');
         
-            setTimeout(() => onSuccess({success:true}), 800);
+            setTimeout(() => {
+                Object.assign(this.mockData.schoolSettings, payload);
+                // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+                try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
+                onSuccess({success:true});
+            }, 800);
         
     },
 
@@ -2155,6 +2325,9 @@ var app = {
             k.aktif = document.getElementById('set-rekap-aktif').checked;
             k.tampilkanAlamat = document.getElementById('set-rekap-alamat').checked;
             k.tampilkanKontak = document.getElementById('set-rekap-kontak').checked;
+            
+            // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+            try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
             
             btn.innerHTML = oHtml;
             this.showToast('Pengaturan Kop Rekap berhasil disimpan.', 'check_circle', 'text-green-400');
@@ -2173,6 +2346,9 @@ var app = {
             k.subjudul = document.getElementById('set-slip-subjudul').value;
             k.tampilkanAlamat = document.getElementById('set-slip-alamat').checked;
             k.tampilkanKontak = document.getElementById('set-slip-kontak').checked;
+            
+            // TAHAP 2: Simpan pengaturan ke koleksi terpisah
+            try { if(typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, {merge:true}); } catch(e){}
             
             btn.innerHTML = oHtml;
             this.showToast('Pengaturan Kop Slip Gaji berhasil disimpan.', 'check_circle', 'text-green-400');
@@ -2843,6 +3019,9 @@ var app = {
                 item.status = status;
                 item.catatan = catatan;
                 
+                // TAHAP 3: Simpan update status izin ke koleksi terpisah
+                try { if(typeof db !== 'undefined') db.collection('izin_guru').doc(item.id).set(item, {merge:true}); } catch(e){}
+                
                 if (status === 'DISETUJUI') {
                     // Masukkan ke riwayat
                     let startDate = new Date(item.tglMulai);
@@ -2851,19 +3030,28 @@ var app = {
                     if (startDate <= endDate) {
                         for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
                             const tglString = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+                            const yyyy = d.getFullYear();
+                            const mm = String(d.getMonth() + 1).padStart(2, '0');
+                            const dd = String(d.getDate()).padStart(2, '0');
+                            const docId = `${yyyy}${mm}${dd}_${item.nip}`;
                             
                             // Cek jika sudah ada (timpa statusnya)
                             let existingRecord = this.mockData.riwayat.find(r => r.tanggal === tglString && r.nip === item.nip);
                             let finalStatus = item.jenis === 'KOREKSI' ? 'Hadir (Koreksi)' : item.jenis;
                             
+                            let updatePayload = {};
+                            
                             if (existingRecord) {
                                 existingRecord.status = finalStatus;
+                                updatePayload.status = finalStatus;
                                 if (item.jenis !== 'KOREKSI') {
                                     existingRecord.jamMasuk = '--:--';
                                     existingRecord.jamPulang = '--:--';
+                                    updatePayload.jamMasuk = '--:--';
+                                    updatePayload.jamPulang = '--:--';
                                 }
                             } else {
-                                this.mockData.riwayat.unshift({
+                                const newRecord = {
                                     tanggal: tglString,
                                     nip: item.nip,
                                     namaGuru: item.nama,
@@ -2872,8 +3060,13 @@ var app = {
                                     status: finalStatus, // IZIN, SAKIT, CUTI, atau Hadir (Koreksi)
                                     fotoMasuk: '',
                                     fotoPulang: ''
-                                });
+                                };
+                                this.mockData.riwayat.unshift(newRecord);
+                                updatePayload = newRecord;
                             }
+                            
+                            // TAHAP 1 & 3: Simpan persetujuan absen ke koleksi presensi_guru secara langsung
+                            try { if(typeof db !== 'undefined') db.collection('presensi_guru').doc(docId).set(updatePayload, {merge:true}); } catch(e){}
                         }
                     }
                 }
@@ -3008,6 +3201,10 @@ var app = {
     deleteSlipAdmin(id) {
         if (!confirm('Hapus slip gaji ini?')) return;
         this.mockData.slipGaji = this.mockData.slipGaji.filter(s => s.id !== id);
+        
+        // TAHAP 3: Hapus dari koleksi terpisah
+        try { if(typeof db !== 'undefined') db.collection('slip_gaji').doc(id).set({isDeleted: true}, {merge:true}); } catch(e){}
+        
         this.showToast('Slip dihapus', 'check_circle', 'text-green-400');
         this.loadSlipAdmin();
     },
@@ -3227,6 +3424,10 @@ var app = {
         if(this.state.slipTempData) {
             this.mockData.slipGaji.unshift(this.state.slipTempData);
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+            
+            // TAHAP 3: Simpan ke koleksi terpisah
+            try { if(typeof db !== 'undefined') db.collection('slip_gaji').doc(this.state.slipTempData.id).set(this.state.slipTempData, {merge:true}); } catch(e){}
+            
             this.state.slipTempData = null;
             this.showToast('Slip gaji berhasil dibuat', 'check_circle', 'text-green-400');
             this.navigate('admin-upload-slip');
@@ -3845,7 +4046,7 @@ var app = {
             const now = new Date();
             const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
             
-            this.mockData.jurnal.push({
+            const newJurnal = {
                 id: 'JRN' + Date.now(),
                 timestamp: Date.now(),
                 tanggal: tglString,
@@ -3855,10 +4056,14 @@ var app = {
                 mapel,
                 materi,
                 foto: fotoBase64
-            });
+            };
+            this.mockData.jurnal.push(newJurnal);
             
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
-            try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
+            
+            // TAHAP 3: Simpan jurnal ke koleksi terpisah
+            try { if(typeof db !== 'undefined') db.collection('jurnal_guru').doc(newJurnal.id).set(newJurnal, {merge:true}); } catch(e){}
+            
             setTimeout(() => {
                 btn.innerHTML = ogText;
                 btn.disabled = false;
@@ -3939,7 +4144,10 @@ var app = {
                     };
                     this.mockData.izinAdmin.unshift(newIzin);
                     localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
-                    try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
+                    
+                    // TAHAP 3: Simpan ke koleksi terpisah
+                    try { if(typeof db !== 'undefined') db.collection('izin_guru').doc(newIzin.id).set(newIzin, {merge:true}); } catch(e){}
+                    
                     onSuccess({ success: true });
                 }, 1000);
             
@@ -4285,6 +4493,10 @@ var app = {
         const guru = this.mockData.dataGuru[index];
         if(confirm(`PERINGATAN: Anda yakin ingin menghapus data guru ${guru.nama} secara permanen?\nData yang dihapus tidak dapat dikembalikan.`)) {
             this.mockData.dataGuru.splice(index, 1);
+            
+            // TAHAP 2: Simpan perubahan hapus ke koleksi
+            try { if(typeof db !== 'undefined') db.collection('data_guru').doc(id).set({isDeleted: true}, {merge:true}); } catch(e){}
+            
             this.showToast(`Data guru ${guru.nama} berhasil dihapus.`, 'check_circle', 'text-green-400');
             this.renderDataGuru();
         }
@@ -4344,6 +4556,9 @@ var app = {
                 // Simpan perubahan ke localStorage
                 localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
                 
+                // TAHAP 2: Simpan ke koleksi terpisah
+                try { if(typeof db !== 'undefined') db.collection('data_guru').doc(id).set(g, {merge:true}); } catch(e){}
+                
                 this.showToast('Data guru berhasil diperbarui.', 'check_circle', 'text-green-400');
             }
         } else {
@@ -4373,6 +4588,10 @@ var app = {
             };
             this.mockData.dataGuru.unshift(newGuru);
             localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+            
+            // TAHAP 2: Simpan ke koleksi terpisah
+            try { if(typeof db !== 'undefined') db.collection('data_guru').doc(id).set(newGuru, {merge:true}); } catch(e){}
+            
             this.showToast('Data guru berhasil ditambahkan.', 'check_circle', 'text-green-400');
         }
 
@@ -4543,7 +4762,7 @@ var app = {
         this.state.tempImportData.forEach(row => {
             const idGuru = (row.ID_GURU || '').toString().trim();
             if(!this.mockData.dataGuru.some(g => g.id === idGuru)) {
-                this.mockData.dataGuru.unshift({
+                const newGuru = {
                     id: idGuru,
                     nip: (row.NIP || '').toString().trim() || '-',
                     nama: (row.NAMA || '').toString().trim(),
@@ -4557,7 +4776,12 @@ var app = {
                     statusAkun: (row.STATUS_AKUN || '').toString().trim().toUpperCase() === 'NONAKTIF' ? 'Nonaktif' : 'Aktif',
                     fotoUrl: `https://ui-avatars.com/api/?name=${(row.NAMA||'').toString().replace(/ /g,'+')}&background=random&color=fff`,
                     createdAt: new Date().toISOString()
-                });
+                };
+                this.mockData.dataGuru.unshift(newGuru);
+                
+                // TAHAP 2: Simpan ke koleksi terpisah
+                try { if(typeof db !== 'undefined') db.collection('data_guru').doc(idGuru).set(newGuru, {merge:true}); } catch(e){}
+                
                 count++;
             }
         });
