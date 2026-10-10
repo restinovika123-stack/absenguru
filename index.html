@@ -614,7 +614,7 @@ input[type="file"]::file-selector-button:hover {
     <script>
         // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyDL2IQTkYxcR14XmEoOgf76CVVbj9qr6z0",
+            apiKey: "AIzaSyDL2IQTkYxcRl4XmEoOgf76CVVbj9qr6z0",
             authDomain: "absensiguru-268d9.firebaseapp.com",
             projectId: "absensiguru-268d9",
             storageBucket: "absensiguru-268d9.firebasestorage.app",
@@ -1737,47 +1737,75 @@ var app = {
 
         
             // MOCK LOGIC LOCALHOST
-            setTimeout(() => {
+            // LOGIC MENGGUNAKAN TRANSACTION FIRESTORE (Mencegah Race Condition)
+            setTimeout(async () => {
                 const now = new Date();
                 const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
                 const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+                const usernameOrNip = userInfo.username || userInfo.nip || '-';
+                const namaGuru = userInfo.nama || 'Guru';
                 
-                let todayRecord = this.mockData.riwayat.find(r => r.tanggal === tglString && r.nip === (userInfo.username || userInfo.nip));
-                if (todayRecord) {
-                    if (payload.tipe === 'Masuk') {
-                        todayRecord.jamMasuk = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                        todayRecord.fotoMasuk = payload.foto;
-                        todayRecord.jarakMasuk = payload.jarak;
-                        todayRecord.status = payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi');
-                    } else if (payload.tipe === 'Pulang') {
-                        todayRecord.jamPulang = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                        todayRecord.fotoPulang = payload.foto;
-                        todayRecord.jarakPulang = payload.jarak;
-                        if(todayRecord.status !== 'Terlambat' && todayRecord.status !== 'Di Luar Lokasi') {
-                             todayRecord.status = 'Selesai';
+                const processData = (dataToProcess) => {
+                    let todayRecord = dataToProcess.riwayat.find(r => r.tanggal === tglString && r.nip === usernameOrNip);
+                    if (todayRecord) {
+                        if (payload.tipe === 'Masuk') {
+                            todayRecord.jamMasuk = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+                            todayRecord.fotoMasuk = payload.foto;
+                            todayRecord.jarakMasuk = payload.jarak;
+                            todayRecord.status = payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi');
+                        } else if (payload.tipe === 'Pulang') {
+                            todayRecord.jamPulang = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+                            todayRecord.fotoPulang = payload.foto;
+                            todayRecord.jarakPulang = payload.jarak;
+                            if(todayRecord.status !== 'Terlambat' && todayRecord.status !== 'Di Luar Lokasi') {
+                                 todayRecord.status = 'Selesai';
+                            }
                         }
+                    } else {
+                        dataToProcess.riwayat.unshift({
+                            tanggal: tglString,
+                            nip: usernameOrNip,
+                            namaGuru: namaGuru,
+                            jamMasuk: payload.tipe === 'Masuk' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
+                            jamPulang: payload.tipe === 'Pulang' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
+                            jarakMasuk: payload.tipe === 'Masuk' ? payload.jarak : null,
+                            jarakPulang: payload.tipe === 'Pulang' ? payload.jarak : null,
+                            status: payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi'),
+                            fotoMasuk: payload.tipe === 'Masuk' ? payload.foto : '',
+                            fotoPulang: payload.tipe === 'Pulang' ? payload.foto : ''
+                        });
                     }
-                } else {
-                    this.mockData.riwayat.unshift({
-                        tanggal: tglString,
-                        nip: (userInfo.username || userInfo.nip) || '-',
-                        namaGuru: userInfo.nama || 'Guru',
-                        jamMasuk: payload.tipe === 'Masuk' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
-                        jamPulang: payload.tipe === 'Pulang' ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` : '--:--',
-                        jarakMasuk: payload.tipe === 'Masuk' ? payload.jarak : null,
-                        jarakPulang: payload.tipe === 'Pulang' ? payload.jarak : null,
-                        status: payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi'),
-                        fotoMasuk: payload.tipe === 'Masuk' ? payload.foto : '',
-                        fotoPulang: payload.tipe === 'Pulang' ? payload.foto : ''
-                    });
+                    return dataToProcess;
+                };
+
+                try {
+                    if (typeof db !== 'undefined') {
+                        const docRef = db.collection('appData').doc('mainState');
+                        await db.runTransaction(async (transaction) => {
+                            const doc = await transaction.get(docRef);
+                            let latestData = doc.exists ? doc.data() : JSON.parse(JSON.stringify(this.mockData));
+                            
+                            // Pastikan array riwayat ada
+                            if (!latestData.riwayat) latestData.riwayat = [];
+                            
+                            latestData = processData(latestData);
+                            transaction.set(docRef, latestData, { merge: true });
+                            this.mockData = latestData; // update state lokal
+                        });
+                        localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
+                        onSuccess({ success: true, message: `Presensi ${payload.tipe} berhasil dikirim!` });
+                        return; // Selesai jika transaksi sukses
+                    }
+                } catch (e) {
+                    console.warn("Transaksi Firebase gagal, menggunakan fallback lokal", e);
                 }
-                
-                // Simpan perubahan ke localStorage
+
+                // Fallback jika tidak ada koneksi / transaksi gagal
+                this.mockData = processData(this.mockData);
                 localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
                 try { db.collection('appData').doc('mainState').set(this.mockData, { merge: true }); } catch(e){}
-                
-                onSuccess({ success: true, message: `Mock: Presensi ${payload.tipe} berhasil dikirim!` });
-            }, 1500);
+                onSuccess({ success: true, message: `Presensi ${payload.tipe} berhasil dikirim (Lokal)!` });
+            }, 500);
         
     },
 
