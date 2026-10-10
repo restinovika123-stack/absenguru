@@ -766,8 +766,8 @@ var app = {
                 
                 // Urutkan berdasarkan tanggal terbaru di atas
                 this.mockData.riwayat = Array.from(map.values()).sort((a,b) => {
-                    let dateA = a.tanggal.split('/').reverse().join('');
-                    let dateB = b.tanggal.split('/').reverse().join('');
+                    let dateA = (a.tanggal || '').split('/').reverse().join('');
+                    let dateB = (b.tanggal || '').split('/').reverse().join('');
                     return dateB.localeCompare(dateA);
                 });
                 
@@ -776,6 +776,7 @@ var app = {
                 
                 // Refresh tampilan jika admin sedang membuka halaman rekap
                 if (this.state) {
+                    if (this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
                     if (this.state.currentScreen === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
                     if (this.state.currentScreen === 'admin-riwayat' && typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
                     if (this.state.currentScreen === 'guru-riwayat' && typeof this.loadRiwayatGuru === 'function') this.loadRiwayatGuru();
@@ -1927,6 +1928,14 @@ var app = {
                                  updatePayload.status = 'Selesai';
                             }
                         }
+
+                        // Optimistic Update UI (Biar gak usah direfresh)
+                        if (existingLocal) {
+                            Object.assign(existingLocal, updatePayload);
+                        } else {
+                            this.mockData.riwayat.unshift(updatePayload);
+                        }
+                        localStorage.setItem('absenguru_app_data', JSON.stringify(this.mockData));
 
                         // 3. Tulis langsung ke server tanpa antrean (Metode Fire & Forget)
                         await docRef.set(updatePayload, { merge: true });
