@@ -727,10 +727,10 @@ var app = {
     // ==========================================
     init() {
         // 1. Memuat dari lokal (terisolasi per projectId)
+        // Catatan: data lama tanpa projectId ('absenguru_app_data') TIDAK dipakai lagi,
+        // karena bisa berisi data dari proyek Firebase lain (mis. data contoh template).
+        try { localStorage.removeItem('absenguru_app_data'); } catch (e) {}
         let savedData = localStorage.getItem(APP_STORAGE_KEY);
-        if (!savedData) {
-            savedData = localStorage.getItem('absenguru_app_data');
-        }
         if (savedData) {
             try {
                 this.mockData = JSON.parse(savedData);
@@ -738,6 +738,11 @@ var app = {
                 console.error('Gagal memuat data lokal', e);
             }
         }
+        // Daftar guru lama hasil migrasi tidak dipakai lagi; sumber data guru = koleksi data_guru di Firebase
+        delete this.mockData.dataGuruLamaMainState;
+        // Tandai data belum sinkron dengan server (ALPA otomatis ditunda sampai sinkron)
+        this.state.guruSynced = false;
+        this.state.presensiSynced = false;
         if (this.mockData.lokasiDanJamKerja) {
             const lk = this.mockData.lokasiDanJamKerja;
             if (lk.lat && lk.lng) {
@@ -985,7 +990,11 @@ var app = {
                     }
                 } else {
                     // Jika dokumen di Firebase belum ada, buat pertama kali
-                    db.collection('appData').doc('mainState').set(this.mockData).catch(err => {
+                    // Hanya simpan pengaturan umum; data guru/presensi/izin/jurnal/slip punya koleksi sendiri
+                    const awal = JSON.parse(JSON.stringify(this.mockData));
+                    ['riwayat', 'riwayatLamaMainState', 'dataGuru', 'dataGuruLamaMainState', 'izin', 'izinAdmin', 'izinLamaMainState',
+                     'jurnal', 'jurnalLamaMainState', 'slipGaji', 'slipLamaMainState'].forEach(k => delete awal[k]);
+                    db.collection('appData').doc('mainState').set(awal).catch(err => {
                         this.handleFirebaseError(err, 'mainState-set');
                     });
                 }
@@ -994,7 +1003,10 @@ var app = {
             });
 
             // TAHAP 1: Mendengarkan koleksi presensi_guru yang baru
-            this._unsubPresensi = db.collection('presensi_guru').onSnapshot((snapshot) => {
+            this._unsubPresensi = db.collection('presensi_guru').onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
+                const dariCache = !!(snapshot && snapshot.metadata && snapshot.metadata.fromCache);
+                if (dariCache && snapshot.empty) return; // tunggu data dari server
+                if (!dariCache) this.state.presensiSynced = true;
                 let koleksiRiwayat = [];
                 if (snapshot) {
                     snapshot.forEach(doc => {
@@ -1062,38 +1074,41 @@ var app = {
             });
 
             // TAHAP 2: Mendengarkan koleksi data_guru yang baru
-            this._unsubGuru = db.collection('data_guru').onSnapshot((snapshot) => {
+            this._unsubGuru = db.collection('data_guru').onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
+                const dariCache = !!(snapshot && snapshot.metadata && snapshot.metadata.fromCache);
                 let koleksiGuru = [];
                 if (snapshot) {
                     snapshot.forEach(doc => {
                         const d = doc.data();
-                        if (d) koleksiGuru.push(d);
+                        if (d && d.id && !d.isDeleted) koleksiGuru.push(d);
                     });
                 }
-                
-                let guruLama = this.mockData.dataGuruLamaMainState || this.mockData.dataGuru || [];
-                if (!this.mockData.dataGuruLamaMainState) this.mockData.dataGuruLamaMainState = guruLama;
-                
-                let map = new Map();
-                guruLama.forEach(g => {
-                    if (g && g.id) map.set(g.id, g);
-                });
-                koleksiGuru.forEach(g => {
-                    if (!g || !g.id) return;
-                    if (g.isDeleted) map.delete(g.id);
-                    else map.set(g.id, g);
-                });
-                
-                this.mockData.dataGuru = Array.from(map.values()).sort((a,b) => {
+
+                // Data dari cache yang kosong belum tentu benar (mis. masih offline): tunggu data server
+                if (dariCache && koleksiGuru.length === 0) return;
+
+                // Sumber kebenaran daftar guru = koleksi data_guru di Firebase.
+                // Guru yang hanya ada di browser (sisa data lama / proyek lain) tidak ditampilkan lagi.
+                this.mockData.dataGuru = koleksiGuru.sort((a,b) => {
                     return (a.nama || '').localeCompare(b.nama || '');
                 });
-                
+                delete this.mockData.dataGuruLamaMainState;
+
+                if (!dariCache && !this.state.guruSynced) {
+                    this.state.guruSynced = true;
+                    // Data guru sudah sinkron: bersihkan ALPA sistem milik guru yang tidak terdaftar
+                    try { this.bersihkanAlpaTidakValid(); } catch (e) { console.warn(e); }
+                }
+
                 try {
                     localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
                 } catch(e) {}
-                
+
                 if (this.state && this.state.currentScreen === 'admin-guru' && typeof this.renderDataGuru === 'function') {
                     this.renderDataGuru();
+                }
+                if (this.state && this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') {
+                    this.loadDashboardAdmin();
                 }
                 if (this.state && this.state.currentScreen === 'guru-dashboard' && typeof this.loadDashboardGuruData === 'function' && this.state.currentUser) {
                     this.loadDashboardGuruData(this.state.currentUser);
@@ -1734,8 +1749,16 @@ service cloud.firestore {
                 return false;
             }
 
-            // 3. Jika tanggal ALPA sebelum guru tersebut terdaftar / dibuat -> Hapus
             const guru = guruMap.get(r.nip) || (r.namaGuru ? guruMap.get(r.namaGuru.trim().toLowerCase()) : null);
+
+            // 2B. ALPA sistem milik guru yang tidak terdaftar di Firebase (mis. sisa data contoh) -> Hapus
+            //     Hanya dilakukan setelah daftar guru dari server selesai dimuat.
+            if (!guru && this.state && this.state.guruSynced) {
+                this.hapusDokumenFirestorePresensi(r);
+                return false;
+            }
+
+            // 3. Jika tanggal ALPA sebelum guru tersebut terdaftar / dibuat -> Hapus
             if (guru && guru.createdAt) {
                 const tglDaftar = this.parseDateSafe(guru.createdAt);
                 if (tglDaftar) {
@@ -1760,6 +1783,9 @@ service cloud.firestore {
 
     autoGenerateAlpa(targetMonth, targetYear) {
         if (!this.mockData || !this.mockData.dataGuru || !this.mockData.riwayat) return;
+        // Jangan buat ALPA sebelum data guru & presensi dari server selesai dimuat,
+        // agar tidak mencatat ALPA untuk guru yang tidak terdaftar atau yang sebenarnya sudah presensi
+        if (typeof db !== 'undefined' && this.state && (!this.state.guruSynced || !this.state.presensiSynced)) return;
 
         // Bersihkan terlebih dahulu ALPA tidak valid (sebelum tanggal mulai atau sebelum akun guru dibuat)
         this.bersihkanAlpaTidakValid();
