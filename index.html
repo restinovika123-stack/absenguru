@@ -1146,12 +1146,13 @@ var app = {
                         if (d && !d.isDeleted) koleksi.push(d);
                     });
                 }
-                this.mockData.izinAdmin = koleksi.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
+                this.mockData.izinAdmin = koleksi.sort((a,b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
                 this.mockData.izin = this.mockData.izinAdmin;
                 delete this.mockData.izinLamaMainState;
                 localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
                 if (this.state) {
-                    if (this.state.currentScreen === 'admin-izin' && typeof this.renderDataIzin === 'function') this.renderDataIzin();
+                    if (this.state.currentScreen === 'admin-izin' && typeof this.loadIzinAdmin === 'function') this.loadIzinAdmin();
+                    if (this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
                     if (this.state.currentScreen === 'guru-izin' && typeof this.loadIzinGuru === 'function') this.loadIzinGuru();
                 }
             }, (error) => {
@@ -1167,7 +1168,7 @@ var app = {
                         if (d && !d.isDeleted) koleksi.push(d);
                     });
                 }
-                this.mockData.jurnal = koleksi.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
+                this.mockData.jurnal = koleksi.sort((a,b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
                 delete this.mockData.jurnalLamaMainState;
                 localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
                 if (this.state) {
@@ -1187,11 +1188,11 @@ var app = {
                         if (d && !d.isDeleted) koleksi.push(d);
                     });
                 }
-                this.mockData.slipGaji = koleksi.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
+                this.mockData.slipGaji = koleksi.sort((a,b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
                 delete this.mockData.slipLamaMainState;
                 localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
                 if (this.state) {
-                    if (this.state.currentScreen === 'admin-slip' && typeof this.renderDataSlip === 'function') this.renderDataSlip();
+                    if (this.state.currentScreen === 'admin-upload-slip' && typeof this.loadSlipAdmin === 'function') this.loadSlipAdmin();
                     if (this.state.currentScreen === 'guru-slip-gaji' && typeof this.loadSlipGuru === 'function') this.loadSlipGuru();
                 }
             }, (error) => {
@@ -2279,7 +2280,7 @@ service cloud.firestore {
                     // Cek apakah Guru
                     const guru = this.mockData.dataGuru.find(g => g.username === username || (g.nip && g.nip === username) || (g.id && g.id === username));
                     if (guru && guru.password === password) {
-                        if (guru.statusAkun !== 'Aktif') {
+                        if (String(guru.statusAkun || 'Aktif').toLowerCase() !== 'aktif') {
                             onSuccess({success: false, message: 'Akun dinonaktifkan. Hubungi admin.'});
                         } else {
                             onSuccess({
@@ -2332,7 +2333,21 @@ service cloud.firestore {
             (g.nip && user.nip && g.nip !== '-' && g.nip === user.nip) ||
             (g.nama && user.nama && g.nama.trim().toLowerCase() === user.nama.trim().toLowerCase())
         ) || user;
-        const profilePicture = latestGuru.fotoUrl || latestGuru.img;
+
+        // Jika akun guru dinonaktifkan admin, keluarkan dari sesi
+        if (latestGuru !== user && String(latestGuru.statusAkun || 'Aktif').toLowerCase() === 'nonaktif') {
+            localStorage.removeItem('session_token');
+            localStorage.removeItem('user_info');
+            this.state.currentUser = null;
+            // Ditunda agar tidak bentrok dengan navigate() yang sedang berjalan
+            setTimeout(() => {
+                this.navigate('login');
+                this.showToast('Akun Anda dinonaktifkan. Hubungi admin.', 'error', 'text-red-400');
+            }, 0);
+            return;
+        }
+
+        const profilePicture = [latestGuru.fotoUrl, latestGuru.img].find(u => this.isFotoProfilValid(u));
         
         // Update Profil Statis
         document.getElementById('guru-dashboard-nama').innerText = latestGuru.nama || user.nama || 'Guru';
@@ -2435,7 +2450,7 @@ service cloud.firestore {
                 const statusEl = document.getElementById('guru-dashboard-status');
                 statusEl.innerText = d.presensi.status;
                 const statUpper = (d.presensi.status || '').toUpperCase();
-                if(statUpper === 'HADIR' || statUpper === 'SELESAI') {
+                if(this.isStatusHadir(statUpper) && !statUpper.includes('LUAR')) {
                     statusEl.className = 'text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded w-max font-medium';
                 } else if(statUpper.includes('TERLAMBAT')) {
                     statusEl.className = 'text-[10px] bg-yellow-100 text-yellow-700 px-2 py-1 rounded w-max font-medium';
@@ -2546,7 +2561,7 @@ service cloud.firestore {
                         s = 'HADIR';
                     }
 
-                    if(s === 'HADIR' || s === 'SELESAI' || s === 'DI LUAR LOKASI') {
+                    if(this.isStatusHadir(s)) {
                         myHadir++;
                     } else if(s.includes('TERLAMBAT')) {
                         myTerlambat++;
@@ -3033,6 +3048,11 @@ service cloud.firestore {
                             updatePayload.jarakMasuk = payload.jarak;
                             updatePayload.status = payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi');
                             updatePayload.keterangan = 'Presensi Masuk Tercatat';
+                            // Simpan alasan & kondisi khusus presensi masuk (terlambat / di luar lokasi)
+                            updatePayload.kondisiMasuk = payload.status === 'HADIR' ? '' : payload.status;
+                            updatePayload.alasanMasuk = payload.status === 'HADIR' ? '' : (payload.alasan || '');
+                            updatePayload.latMasuk = payload.lat;
+                            updatePayload.lngMasuk = payload.lng;
                             
                             // Isi default jam pulang jika belum ada
                             if (!existingLocal || !existingLocal.jamPulang) {
@@ -3048,7 +3068,13 @@ service cloud.firestore {
                             updatePayload.jam_pulang = `${nowHour}:${nowMin}`;
                             updatePayload.fotoPulang = payload.foto;
                             updatePayload.jarakPulang = payload.jarak;
-                            
+                            // Simpan alasan & kondisi khusus presensi pulang (pulang cepat / di luar lokasi)
+                            updatePayload.kondisiPulang = payload.status === 'HADIR' ? '' : payload.status;
+                            updatePayload.alasanPulang = payload.status === 'HADIR' ? '' : (payload.alasan || '');
+                            updatePayload.pulangCepat = payload.status.includes('PULANG CEPAT');
+                            updatePayload.latPulang = payload.lat;
+                            updatePayload.lngPulang = payload.lng;
+
                             let currentStatus = existingLocal ? existingLocal.status : 'Hadir';
                             if(currentStatus !== 'Terlambat' && currentStatus !== 'Di Luar Lokasi') {
                                  updatePayload.status = 'Selesai';
@@ -3440,9 +3466,9 @@ service cloud.firestore {
             if (typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
             if (typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
             if (typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
-            if (typeof this.renderDataIzin === 'function') this.renderDataIzin();
+            if (typeof this.loadIzinAdmin === 'function') this.loadIzinAdmin();
             if (typeof this.loadJurnalAdmin === 'function') this.loadJurnalAdmin();
-            if (typeof this.renderDataSlip === 'function') this.renderDataSlip();
+            if (typeof this.loadSlipAdmin === 'function') this.loadSlipAdmin();
 
         } catch (error) {
             console.error('Terjadi kesalahan saat reset data bulanan:', error);
@@ -3545,6 +3571,41 @@ service cloud.firestore {
             jamPulangMenit,
             jamKerjaSelesaiMenit
         };
+    },
+
+    // Status yang dihitung sebagai HADIR (termasuk "Hadir (Koreksi)" hasil persetujuan koreksi)
+    isStatusHadir(statusUpper) {
+        const s = String(statusUpper || '').toUpperCase().trim();
+        return s === 'HADIR' || s.startsWith('HADIR') || s === 'SELESAI' || s === 'DI LUAR LOKASI';
+    },
+
+    // Cegah foto profil berisi alamat halaman (bug lama: img.src kosong terbaca sebagai URL halaman)
+    isFotoProfilValid(url) {
+        if (!url || typeof url !== 'string' || url.trim() === '') return false;
+        if (url.startsWith('data:')) return true;
+        const page = location.href.split('#')[0].split('?')[0];
+        if (url === page) return false;
+        // Alamat halaman aplikasi sendiri (mis. https://domain/ atau https://domain/index.html) bukan foto
+        if (location.origin && location.origin !== 'null' && url.startsWith(location.origin)) {
+            const path = url.slice(location.origin.length).split('#')[0].split('?')[0];
+            if (path === '' || /\/(index\.html?)?$/i.test(path)) return false;
+        }
+        return true;
+    },
+
+    escapeHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    },
+
+    // Ubah timestamp (angka atau teks ISO) menjadi milidetik untuk pengurutan
+    toTimestampMs(ts) {
+        if (!ts) return 0;
+        if (typeof ts === 'number') return ts;
+        if (typeof ts === 'object' && typeof ts.toMillis === 'function') return ts.toMillis();
+        const n = new Date(ts).getTime();
+        return isNaN(n) ? 0 : n;
     },
 
     isPresensiAdaFoto(r) {
@@ -4124,7 +4185,7 @@ service cloud.firestore {
                 res.data.forEach(item => {
                     let badgeClass = 'bg-gray-100 text-gray-700';
                     const stat = (item.status || '').toUpperCase();
-                    if(stat === 'HADIR' || stat === 'SELESAI') badgeClass = 'bg-green-100 text-green-700';
+                    if(this.isStatusHadir(stat)) badgeClass = 'bg-green-100 text-green-700';
                     else if(stat.includes('TERLAMBAT')) badgeClass = 'bg-yellow-100 text-yellow-700';
                     else if(stat === 'IZIN' || stat === 'SAKIT' || stat === 'CUTI') badgeClass = 'bg-blue-100 text-blue-700';
                     else if(stat === 'ALPA') badgeClass = 'bg-red-100 text-red-700 border border-red-200';
@@ -4249,7 +4310,7 @@ service cloud.firestore {
                         stat = 'HADIR';
                     }
 
-                    if(stat === 'HADIR' || stat === 'SELESAI' || stat === 'DI LUAR LOKASI') {
+                    if(this.isStatusHadir(stat)) {
                         hadir++;
                     } else if(stat.includes('TERLAMBAT')) {
                         terlambat++;
@@ -4337,30 +4398,47 @@ service cloud.firestore {
         // Render Aktivitas Terbaru (jika riwayat ada)
         const aktivitasContainer = document.getElementById('admin-aktivitas-terbaru');
         if (aktivitasContainer) {
-            if (this.mockData.riwayat.length === 0) {
+            // Hanya presensi nyata (bukan ALPA buatan sistem / izin)
+            const isJamValid = (j) => j && j !== '--:--' && j !== '-' && j !== 'Manual';
+            const aktivitasNyata = (this.mockData.riwayat || []).filter(r =>
+                this.isPresensiAdaFoto(r) || isJamValid(r.jamMasuk || r.jam_masuk)
+            );
+            if (aktivitasNyata.length === 0) {
                 aktivitasContainer.innerHTML = '<p class="text-sm text-gray-500 italic text-center py-4">Belum ada aktivitas.</p>';
             } else {
-                // Ambil 3 aktivitas terbaru
-                const recent = this.mockData.riwayat.slice(0, 3);
+                // Ambil 3 aktivitas terbaru (tanggal terbaru, lalu jam terbaru)
+                const keyWaktu = (r) => {
+                    const tgl = (r.tanggal || '').split('/').reverse().join('');
+                    const jam = isJamValid(r.jamPulang || r.jam_pulang) ? (r.jamPulang || r.jam_pulang) : (r.jamMasuk || r.jam_masuk || '');
+                    return tgl + ' ' + jam;
+                };
+                const recent = aktivitasNyata.slice().sort((a, b) => keyWaktu(b).localeCompare(keyWaktu(a))).slice(0, 3);
                 let html = '';
                 recent.forEach(r => {
                     let icon = 'login';
                     let bg = 'bg-green-100';
                     let textCol = 'text-green-600';
-                    let actionText = 'melakukan presensi masuk';
-                    
-                    if(r.status === 'TERLAMBAT') {
+                    let actionText = 'melakukan presensi masuk (' + (r.jamMasuk || r.jam_masuk || '-') + ')';
+                    const stUp = (r.status || '').toUpperCase();
+                    const jamPulang = r.jamPulang || r.jam_pulang;
+
+                    if (isJamValid(jamPulang)) {
+                        icon = 'logout';
+                        bg = 'bg-blue-100';
+                        textCol = 'text-blue-600';
+                        actionText = (r.pulangCepat ? 'pulang cepat (' : 'melakukan presensi pulang (') + jamPulang + ')';
+                    } else if (stUp.includes('TERLAMBAT')) {
                         icon = 'alarm_off';
                         bg = 'bg-red-100';
                         textCol = 'text-red-600';
-                        actionText = 'terlambat (' + (r.jamMasuk || '-') + ')';
+                        actionText = 'terlambat (' + (r.jamMasuk || r.jam_masuk || '-') + ')';
                     }
-                    
+
                     html += `
                         <div class="flex items-start gap-3">
                             <div class="w-8 h-8 rounded-full ${bg} ${textCol} flex items-center justify-center shrink-0 mt-1"><span class="material-icons-round text-[16px]">${icon}</span></div>
                             <div>
-                                <p class="text-sm text-gray-800"><span class="font-semibold">${r.namaGuru}</span> ${actionText}</p>
+                                <p class="text-sm text-gray-800"><span class="font-semibold">${this.escapeHtml(r.namaGuru || '-')}</span> ${actionText}</p>
                                 <p class="text-xs text-gray-500">${r.tanggal}</p>
                             </div>
                         </div>
@@ -4616,10 +4694,22 @@ service cloud.firestore {
                 res.data.forEach((item, index) => {
                     let badgeClass = 'bg-gray-100 text-gray-700';
                     const stat = (item.status || '').toUpperCase();
-                    if(stat === 'HADIR' || stat === 'SELESAI') badgeClass = 'bg-green-100 text-green-700';
+                    if(this.isStatusHadir(stat)) badgeClass = 'bg-green-100 text-green-700';
                     else if(stat.includes('TERLAMBAT')) badgeClass = 'bg-yellow-100 text-yellow-700';
                     else if(stat === 'IZIN' || stat === 'SAKIT' || stat === 'CUTI') badgeClass = 'bg-blue-100 text-blue-700';
                     else if(stat === 'ALPA') badgeClass = 'bg-red-100 text-red-700 border border-red-200';
+
+                    // Info tambahan: alasan masuk/pulang & pulang cepat
+                    let infoHtml = '';
+                    if (item.pulang_cepat) {
+                        infoHtml += `<span class="inline-block mt-1 bg-orange-100 text-orange-700 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">Pulang Cepat</span>`;
+                    }
+                    if (item.alasan_masuk) {
+                        infoHtml += `<div class="mt-1 text-[10px] text-gray-500 text-left max-w-[180px] mx-auto break-words" title="${this.escapeHtml(item.alasan_masuk)}"><b>Alasan masuk:</b> ${this.escapeHtml(item.alasan_masuk)}</div>`;
+                    }
+                    if (item.alasan_pulang) {
+                        infoHtml += `<div class="mt-1 text-[10px] text-gray-500 text-left max-w-[180px] mx-auto break-words" title="${this.escapeHtml(item.alasan_pulang)}"><b>Alasan pulang:</b> ${this.escapeHtml(item.alasan_pulang)}</div>`;
+                    }
 
                     html += `
                         <tr class="hover:bg-gray-50 border-b border-gray-100 text-sm">
@@ -4629,7 +4719,7 @@ service cloud.firestore {
                             <td class="font-medium p-3 text-gray-800">${item.nama}</td>
                             <td class="text-center p-3 text-gray-600">${item.jam_masuk}</td>
                             <td class="text-center p-3 text-gray-600">${item.jam_pulang}</td>
-                            <td class="text-center p-3"><span class="${badgeClass} text-[10px] px-2 py-1 rounded-full font-bold uppercase tracking-wider">${item.status || 'Alpa'}</span></td>
+                            <td class="text-center p-3"><span class="${badgeClass} text-[10px] px-2 py-1 rounded-full font-bold uppercase tracking-wider">${item.status || 'Alpa'}</span>${infoHtml}</td>
                             <td class="text-center p-3">
                                 ${(item.foto_masuk && item.foto_masuk !== '#' && item.foto_masuk !== '') || (item.foto_pulang && item.foto_pulang !== '#' && item.foto_pulang !== '') ? 
                                     `<button onclick="app.lihatFotoPresensi('${item.foto_masuk || item.foto_pulang}')" class="text-blue-500 hover:text-blue-700 font-medium text-xs flex items-center justify-center gap-1 w-full"><span class="material-icons-round text-[18px]">image</span> Foto</button>` : 
@@ -4710,7 +4800,10 @@ service cloud.firestore {
                 jam_pulang: jPulang,
                 status: st,
                 foto_masuk: r.fotoMasuk || r.foto_masuk || '',
-                foto_pulang: r.fotoPulang || r.foto_pulang || ''
+                foto_pulang: r.fotoPulang || r.foto_pulang || '',
+                alasan_masuk: r.alasanMasuk || '',
+                alasan_pulang: r.alasanPulang || '',
+                pulang_cepat: !!r.pulangCepat
             };
         });
         setTimeout(() => onSuccess({ success: true, data: dataRiwayat }), 100);
@@ -4833,7 +4926,7 @@ service cloud.firestore {
                     }
                     if (st.includes('TERLAMBAT')) {
                         code = 'T';
-                    } else if (st === 'HADIR' || st === 'SELESAI' || st === 'DI LUAR LOKASI') {
+                    } else if (this.isStatusHadir(st)) {
                         code = 'H';
                     } else if (st === 'IZIN') {
                         code = 'I';
@@ -4876,6 +4969,7 @@ service cloud.firestore {
                             const j = (izinItem.jenis || '').toUpperCase();
                             if (j === 'CUTI') code = 'C';
                             else if (j === 'SAKIT') code = 'S';
+                            else if (j === 'KOREKSI') code = 'H'; // Koreksi presensi disetujui = Hadir
                             else code = 'I';
                         } else {
                             // Cek pengajuan koreksi / izin yang masih pending (K)
@@ -5426,7 +5520,7 @@ service cloud.firestore {
                 let html = '';
                 res.data.forEach((item, index) => {
                     if (!item.id) {
-                        item.id = 'IZ' + Math.floor(Math.random()*100000);
+                        item.id = 'IZ' + Date.now() + Math.floor(Math.random()*1000).toString().padStart(3, '0');
                         // Simpan ke storage jika id baru dibuat
                         localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
                     }
@@ -5509,10 +5603,11 @@ service cloud.firestore {
                 
                 if (status === 'DISETUJUI') {
                     // Masukkan ke riwayat
-                    let startDate = new Date(item.tglMulai);
-                    let endDate = new Date(item.tglSelesai);
+                    // Parse sebagai tanggal lokal (bukan UTC) agar tidak bergeser hari
+                    let startDate = this.parseDateSafe(item.tglMulai);
+                    let endDate = this.parseDateSafe(item.tglSelesai);
                     // Hindari loop tak berujung jika data salah
-                    if (startDate <= endDate) {
+                    if (startDate && endDate && startDate <= endDate) {
                         for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
                             // Jangan catat izin/sakit/cuti pada hari libur (kecuali jenis KOREKSI)
                             if (item.jenis !== 'KOREKSI' && this.isTanggalLibur(d)) {
@@ -5538,6 +5633,23 @@ service cloud.firestore {
                                     existingRecord.jamPulang = '--:--';
                                     updatePayload.jamMasuk = '--:--';
                                     updatePayload.jamPulang = '--:--';
+                                } else {
+                                    // Koreksi: isi jam yang kosong dengan "Manual" agar tidak tampak seperti ALPA
+                                    const isBlank = (v) => !v || v === '--:--' || v === '-';
+                                    if (isBlank(existingRecord.jamMasuk)) {
+                                        existingRecord.jamMasuk = 'Manual';
+                                        existingRecord.jam_masuk = 'Manual';
+                                        updatePayload.jamMasuk = 'Manual';
+                                        updatePayload.jam_masuk = 'Manual';
+                                    }
+                                    if (isBlank(existingRecord.jamPulang)) {
+                                        existingRecord.jamPulang = 'Manual';
+                                        existingRecord.jam_pulang = 'Manual';
+                                        updatePayload.jamPulang = 'Manual';
+                                        updatePayload.jam_pulang = 'Manual';
+                                    }
+                                    existingRecord.keterangan = 'Koreksi presensi disetujui admin';
+                                    updatePayload.keterangan = existingRecord.keterangan;
                                 }
                             } else {
                                 const newRecord = {
@@ -5732,7 +5844,7 @@ service cloud.firestore {
         const g = this.mockData.dataGuru.find(x => x.id == guruId);
         
         document.getElementById('sf-nama').innerText = g ? g.nama : '-';
-        document.getElementById('sf-nip').innerText = g ? (g.nip !== '-' ? g.nip : '1988' + Math.floor(Math.random()*100000000)) : '-'; // Gunakan nip jika ada
+        document.getElementById('sf-nip').innerText = g ? ((g.nip && g.nip !== '-') ? g.nip : '-') : '-'; // Tampilkan NIP asli, '-' jika guru tidak punya NIP
         document.getElementById('sf-jabatan').innerText = g ? g.jabatan : '-';
         document.getElementById('sf-status').innerText = g ? g.statusKepegawaian : '-'; // pastikan property benar
     },
@@ -5833,7 +5945,7 @@ service cloud.firestore {
 
     renderPreviewData(item) {
         document.getElementById('prv-periode').innerText = 'Periode: ' + item.bulan + ' ' + item.tahun;
-        document.getElementById('prv-no-slip').innerText = 'No: SLIP-' + item.tahun + (item.bulan.substring(0,3).toUpperCase()) + '-' + Math.floor(Math.random()*10000);
+        document.getElementById('prv-no-slip').innerText = 'No: SLIP-' + item.tahun + (item.bulan.substring(0,3).toUpperCase()) + '-' + (String(item.id || '').replace(/\D/g, '').slice(-5) || '00000'); // Nomor tetap per slip
         
         document.getElementById('prv-nama').innerText = item.namaGuru;
         document.getElementById('prv-nip').innerText = item.nip;
@@ -6878,7 +6990,7 @@ service cloud.firestore {
             setTimeout(() => {
                 const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
                 const newIzin = {
-                    id: 'IZ' + Math.floor(Math.random()*10000),
+                    id: 'IZ' + Date.now() + Math.floor(Math.random()*1000).toString().padStart(3, '0'),
                     timestamp: new Date().toISOString(),
                     nip: (userInfo.username || userInfo.nip) || '-',
                     nama: userInfo.nama || 'Guru',
@@ -6890,6 +7002,7 @@ service cloud.firestore {
                     status: 'Menunggu',
                     catatan: ''
                 };
+                if (!Array.isArray(this.mockData.izinAdmin)) this.mockData.izinAdmin = [];
                 this.mockData.izinAdmin.unshift(newIzin);
                 localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
                 this.autoGenerateAlpa();
@@ -7155,7 +7268,7 @@ service cloud.firestore {
                 const nipGuru = g.nip || '-';
                 const jabatanGuru = g.jabatan || 'Guru';
                 const cleanName = encodeURIComponent(namaGuru.replace(/[^a-zA-Z0-9 ]/g, ''));
-                const fotoSrc = g.fotoUrl || g.img || `https://ui-avatars.com/api/?name=${cleanName || 'Guru'}&background=random&color=fff`;
+                const fotoSrc = [g.fotoUrl, g.img].find(u => this.isFotoProfilValid(u)) || `https://ui-avatars.com/api/?name=${cleanName || 'Guru'}&background=random&color=fff`;
                 
                 html += `
                     <tr class="hover:bg-gray-50 transition border-b border-gray-100 last:border-b-0">
@@ -7224,9 +7337,18 @@ service cloud.firestore {
         const guru = this.mockData.dataGuru.find(g => g.id === id);
         if(!guru) return;
         
-        const nextStatus = guru.statusAkun === 'Aktif' ? 'Nonaktif' : 'Aktif';
+        const curStatus = String(guru.statusAkun || 'Aktif').toLowerCase();
+        const nextStatus = curStatus === 'aktif' ? 'Nonaktif' : 'Aktif';
         if(confirm(`Anda yakin ingin me-${nextStatus.toLowerCase()}kan akun guru ${guru.nama}?`)) {
             guru.statusAkun = nextStatus;
+            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            // Simpan ke koleksi data_guru agar berlaku di semua perangkat
+            try {
+                if (typeof db !== 'undefined') {
+                    db.collection('data_guru').doc(id).set({ statusAkun: nextStatus }, { merge: true })
+                        .catch(e => console.warn('Gagal menyimpan status akun guru', e));
+                }
+            } catch(e) {}
             this.showToast(`Akun berhasil di${nextStatus.toLowerCase()}kan.`, 'check_circle', 'text-green-400');
             this.renderDataGuru();
         }
@@ -7318,7 +7440,7 @@ service cloud.firestore {
         document.getElementById('tg-role').value = guru.role || 'GURU';
         document.getElementById('tg-status-akun').value = guru.statusAkun || 'Aktif';
 
-        const targetFoto = guru.fotoUrl || guru.img;
+        const targetFoto = [guru.fotoUrl, guru.img].find(u => this.isFotoProfilValid(u));
         if(targetFoto && !targetFoto.includes('ui-avatars')) {
             document.getElementById('tg-preview-foto').src = targetFoto;
             document.getElementById('tg-preview-foto').classList.remove('hidden');
@@ -7470,7 +7592,7 @@ service cloud.firestore {
                 password: document.getElementById('tg-password').value,
                 role: document.getElementById('tg-role').value,
                 statusAkun: document.getElementById('tg-status-akun').value,
-                fotoUrl: document.getElementById('tg-preview-foto').src || `https://ui-avatars.com/api/?name=${nama.replace(/ /g,'+')}&background=random&color=fff`,
+                fotoUrl: (document.getElementById('tg-preview-foto').getAttribute('src') || '').trim() || `https://ui-avatars.com/api/?name=${nama.replace(/ /g,'+')}&background=random&color=fff`,
                 createdAt: new Date().toISOString()
             };
             this.mockData.dataGuru.unshift(newGuru);
