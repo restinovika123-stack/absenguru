@@ -1,0 +1,12 @@
+{
+  "nama": "Sekolah Demo",
+  "aktif": true,
+  "firebase": {
+    "apiKey": "AIzaSyAOcRBQ539TlgPV15Thdib0DsKCh8YvhJM",
+    "authDomain": "presensiguru-cf829.firebaseapp.com",
+    "projectId": "presensiguru-cf829",
+    "storageBucket": "presensiguru-cf829.firebasestorage.app",
+    "messagingSenderId": "338604798666",
+    "appId": "1:338604798666:web:170ab26e18406759ab7a33"
+  }
+}

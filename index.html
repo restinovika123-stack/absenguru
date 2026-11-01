@@ -6,9 +6,9 @@
     <title>Presensi Guru</title>
     
     <!-- Ikon di Tab Browser & Perangkat Apple -->
-    <link rel="icon" type="image/png" href="logo.png">
-    <link rel="shortcut icon" href="logo.png">
-    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="icon" type="image/png" href="/logo.png">
+    <link rel="shortcut icon" href="/logo.png">
+    <link rel="apple-touch-icon" href="/logo.png">
     
     <!-- Gambar untuk Preview Link (Open Graph / WhatsApp / FB) -->
     <meta property="og:title" content="Presensi Guru">
@@ -21,12 +21,12 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:image" content="https://presensiguru-seven.vercel.app/logo.png">
 
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#16a34a">
     <script>
         if ('serviceWorker' in navigator && (location.protocol === 'http:' || location.protocol === 'https:')) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').catch(err => {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
                     console.log('ServiceWorker registration failed: ', err);
                 });
             });
@@ -613,7 +613,7 @@ input[type="file"]::file-selector-button:hover {
     </div>
 
     <!-- SheetJS with Full Styling Support (xlsx-js-style) for Rich Excel Export -->
-    <script src="xlsx.bundle.js"></script>
+    <script src="/xlsx.bundle.js"></script>
     <script>
         if (typeof XLSX === 'undefined' || !XLSX.writeFile) {
             document.write('<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"><\/script>');
@@ -626,18 +626,151 @@ input[type="file"]::file-selector-button:hover {
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script>
-        // GANTI KONFIGURASI INI DENGAN FIREBASE PROJECT ANDA
-        const firebaseConfig = {
-            apiKey: "AIzaSyAOcRBQ539TlgPV15Thdib0DsKCh8YvhJM",
-            authDomain: "presensiguru-cf829.firebaseapp.com",
-            projectId: "presensiguru-cf829",
-            storageBucket: "presensiguru-cf829.firebasestorage.app",
-            messagingSenderId: "338604798666",
-            appId: "1:338604798666:web:170ab26e18406759ab7a33"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const APP_STORAGE_KEY = 'absenguru_app_data_' + (firebaseConfig.projectId || 'default');
+        // ==========================================================
+        // PEMUAT SEKOLAH (MULTI-SEKOLAH)
+        // Setiap sekolah punya link sendiri: https://domain/<kode-sekolah>
+        // Konfigurasi Firebase sekolah dibaca dari file /sekolah/<kode-sekolah>.json
+        // (lihat sekolah/README.md untuk cara mendaftarkan sekolah baru)
+        // ==========================================================
+        var firebaseConfig, db, APP_STORAGE_KEY;
+        var SESSION_KEY = 'session_token', USER_KEY = 'user_info';
+        window.SEKOLAH = null;
+
+        (function () {
+            var KODE_AKTIF_KEY = 'absenguru_sekolah_aktif';
+            var CACHE_PREFIX = 'absenguru_sekolah_cfg_';
+            var FILE_RESERVED = ['index.html', 'sekolah', 'sw.js', 'manifest.json', 'logo.png', 'xlsx.bundle.js', 'favicon.ico'];
+
+            function normalisasiKode(k) {
+                k = String(k || '').trim().toLowerCase();
+                if (!k || FILE_RESERVED.indexOf(k) !== -1 || !/^[a-z0-9][a-z0-9-]{1,39}$/.test(k)) return '';
+                return k;
+            }
+            function kodeDariUrl() {
+                var q = '';
+                try { q = new URLSearchParams(location.search).get('sekolah') || ''; } catch (e) {}
+                var seg = location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '';
+                return normalisasiKode(q || decodeURIComponent(seg));
+            }
+            function bacaLokal(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+            function tulisLokal(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+            function hapusLokal(key) { try { localStorage.removeItem(key); } catch (e) {} }
+
+            function configValid(c) {
+                return c && c.firebase && c.firebase.apiKey && c.firebase.projectId && c.firebase.appId;
+            }
+
+            function aktifkan(kode, data) {
+                firebaseConfig = data.firebase;
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                APP_STORAGE_KEY = 'absenguru_app_data_' + (firebaseConfig.projectId || kode);
+                // Login & sesi dipisah per sekolah
+                SESSION_KEY = 'session_token_' + kode;
+                USER_KEY = 'user_info_' + kode;
+                window.SEKOLAH = { kode: kode, nama: data.nama || '', aktif: true };
+                tulisLokal(KODE_AKTIF_KEY, kode);
+                tulisLokal(CACHE_PREFIX + kode, JSON.stringify(data));
+                if (data.nama) document.title = 'Presensi Guru - ' + data.nama;
+                // Tampilkan kode sekolah di alamat agar jelas sekolah mana yang dibuka
+                try {
+                    var path = '/' + kode;
+                    if (location.pathname !== path && location.pathname !== path + '/') {
+                        history.replaceState(null, '', path + location.hash);
+                    }
+                } catch (e) {}
+                return { status: 'ok', kode: kode };
+            }
+
+            window.SEKOLAH_SIAP = (function () {
+                var dariUrl = kodeDariUrl();
+                var kode = dariUrl || normalisasiKode(bacaLokal(KODE_AKTIF_KEY));
+                if (!kode) return Promise.resolve({ status: 'pilih' });
+
+                return fetch('/sekolah/' + kode + '.json', { cache: 'no-store' })
+                    .then(function (res) {
+                        if (!res.ok) return { tidakAda: true };
+                        return res.text().then(function (txt) {
+                            try { return { data: JSON.parse(txt) }; } catch (e) { return { tidakAda: true }; }
+                        });
+                    }, function () {
+                        return { offline: true };
+                    })
+                    .then(function (h) {
+                        if (h.offline) {
+                            // Offline: pakai konfigurasi terakhir yang tersimpan di perangkat
+                            var cache = null;
+                            try { cache = JSON.parse(bacaLokal(CACHE_PREFIX + kode) || 'null'); } catch (e) {}
+                            if (configValid(cache) && cache.aktif !== false) return aktifkan(kode, cache);
+                            return { status: 'offline', kode: kode };
+                        }
+                        if (h.tidakAda || !configValid(h.data)) {
+                            hapusLokal(CACHE_PREFIX + kode);
+                            if (!dariUrl) hapusLokal(KODE_AKTIF_KEY);
+                            return { status: 'tidak_ditemukan', kode: kode };
+                        }
+                        if (h.data.aktif === false) {
+                            hapusLokal(CACHE_PREFIX + kode);
+                            return { status: 'nonaktif', kode: kode, nama: h.data.nama || '' };
+                        }
+                        return aktifkan(kode, h.data);
+                    })
+                    .catch(function (e) {
+                        console.error('Gagal memuat konfigurasi sekolah', e);
+                        return { status: 'error', kode: kode };
+                    });
+            })();
+
+            // Layar ketika sekolah belum dipilih / tidak ditemukan / tidak aktif
+            window.tampilkanLayarSekolah = function (hasil) {
+                var judul = 'Masuk ke Aplikasi Sekolah';
+                var pesan = 'Masukkan kode sekolah Anda. Kode ini ada di link yang diberikan oleh admin sekolah.';
+                if (hasil.status === 'tidak_ditemukan') {
+                    judul = 'Sekolah tidak ditemukan';
+                    pesan = 'Kode sekolah "' + hasil.kode + '" tidak terdaftar. Periksa kembali link dari admin sekolah.';
+                } else if (hasil.status === 'nonaktif') {
+                    judul = 'Langganan tidak aktif';
+                    pesan = 'Aplikasi presensi ' + (hasil.nama || 'sekolah ini') + ' sedang tidak aktif. Silakan hubungi admin sekolah.';
+                } else if (hasil.status === 'offline') {
+                    judul = 'Tidak ada koneksi internet';
+                    pesan = 'Sambungkan perangkat ke internet, lalu muat ulang halaman ini.';
+                } else if (hasil.status === 'error') {
+                    judul = 'Gagal memuat aplikasi';
+                    pesan = 'Terjadi kesalahan saat memuat data sekolah. Silakan muat ulang halaman.';
+                }
+                var el = document.createElement('div');
+                el.id = 'layar-sekolah';
+                el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#f9fafb;display:flex;align-items:center;justify-content:center;padding:24px;font-family:Inter,sans-serif;';
+                el.innerHTML =
+                    '<div style="max-width:380px;width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.06)">' +
+                    '<img src="/logo.png" alt="" style="width:64px;height:64px;object-fit:contain;margin:0 auto 12px">' +
+                    '<h1 id="layar-sekolah-judul" style="font-size:20px;font-weight:700;color:#111827;margin:0 0 8px"></h1>' +
+                    '<p id="layar-sekolah-pesan" style="font-size:14px;color:#4b5563;margin:0 0 20px;line-height:1.5"></p>' +
+                    '<form id="layar-sekolah-form" style="display:flex;flex-direction:column;gap:10px">' +
+                    '<input id="layar-sekolah-kode" type="text" placeholder="Contoh: sdn1natar" autocomplete="off" autocapitalize="off" style="border:1px solid #d1d5db;border-radius:10px;padding:12px;font-size:15px;outline:none">' +
+                    '<p id="layar-sekolah-error" style="display:none;color:#dc2626;font-size:13px;margin:0">Kode hanya boleh huruf kecil, angka, dan tanda minus.</p>' +
+                    '<button type="submit" style="background:#15803d;color:#fff;border:0;border-radius:10px;padding:12px;font-size:15px;font-weight:600;cursor:pointer">Buka Aplikasi</button>' +
+                    '</form></div>';
+                document.body.appendChild(el);
+                document.getElementById('layar-sekolah-judul').textContent = judul;
+                document.getElementById('layar-sekolah-pesan').textContent = pesan;
+                var form = document.getElementById('layar-sekolah-form');
+                if (hasil.status === 'offline' || hasil.status === 'error') {
+                    form.innerHTML = '<button type="button" onclick="location.reload()" style="background:#15803d;color:#fff;border:0;border-radius:10px;padding:12px;font-size:15px;font-weight:600;cursor:pointer">Muat Ulang</button>';
+                    return;
+                }
+                var input = document.getElementById('layar-sekolah-kode');
+                var err = document.getElementById('layar-sekolah-error');
+                input.addEventListener('input', function () { err.style.display = 'none'; });
+                form.addEventListener('submit', function (ev) {
+                    ev.preventDefault();
+                    var k = normalisasiKode(input.value);
+                    if (!k) { err.style.display = 'block'; return; }
+                    tulisLokal(KODE_AKTIF_KEY, k);
+                    location.href = '/' + k;
+                });
+            };
+        })();
     </script>
 
     <!-- Script that handles templates, routing, and logic -->
@@ -756,6 +889,7 @@ var app = {
 
         // 2. Mendengarkan perubahan dari Firebase (Sync Real-time)
         this.setupFirebaseListeners();
+        this.sinkronJamServer();
         
         // 3. Auto-save perubahan dari sisi pengguna ke Firebase
         let lastSavedDataString = JSON.stringify(this.mockData);
@@ -764,7 +898,7 @@ var app = {
             
             // Simpan ke lokal
             if (currentDataString !== lastSavedDataString) {
-                localStorage.setItem(APP_STORAGE_KEY, currentDataString);
+                app.simpanLokal();
                 
                 // Hapus data yang sudah memiliki koleksi sendiri agar tidak memperbesar mainState
                 let dataToSave = JSON.parse(currentDataString);
@@ -785,7 +919,7 @@ var app = {
 
                 // Simpan ke Firebase hanya jika ada perubahan (Dan hanya dilakukan oleh Admin)
                 // Ini mencegah masalah contention (antrean) ketika ratusan guru absen bersamaan
-                const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+                const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
                 if (userInfo.role && userInfo.role.toUpperCase() === 'ADMIN' && !this.state.firebasePermissionError) {
                     try {
                         if (typeof db !== 'undefined') {
@@ -829,8 +963,8 @@ var app = {
             }
         }, 30000);
 
-        const token = localStorage.getItem('session_token');
-        const userStr = localStorage.getItem('user_info');
+        const token = localStorage.getItem(SESSION_KEY);
+        const userStr = localStorage.getItem(USER_KEY);
         if (token && userStr) {
             const user = JSON.parse(userStr);
             this.state.currentUser = user;
@@ -859,6 +993,7 @@ var app = {
         if (typeof this._unsubIzin === 'function') { try { this._unsubIzin(); } catch(e){} }
         if (typeof this._unsubJurnal === 'function') { try { this._unsubJurnal(); } catch(e){} }
         if (typeof this._unsubSlip === 'function') { try { this._unsubSlip(); } catch(e){} }
+        this.hentikanPantauDataPengguna();
 
         try {
             this._unsubMainState = db.collection('appData').doc('mainState').onSnapshot((doc) => {
@@ -964,7 +1099,7 @@ var app = {
                             };
                         }
 
-                        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                        app.simpanLokal();
                         
                         // Perbarui tampilan brand sekolah di seluruh layar
                         if (typeof this.applySchoolBrand === 'function') {
@@ -1002,77 +1137,6 @@ var app = {
                 this.handleFirebaseError(error, 'mainState');
             });
 
-            // TAHAP 1: Mendengarkan koleksi presensi_guru yang baru
-            this._unsubPresensi = db.collection('presensi_guru').onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
-                const dariCache = !!(snapshot && snapshot.metadata && snapshot.metadata.fromCache);
-                if (dariCache && snapshot.empty) return; // tunggu data dari server
-                if (!dariCache) this.state.presensiSynced = true;
-                let koleksiRiwayat = [];
-                if (snapshot) {
-                    snapshot.forEach(doc => {
-                        const d = doc.data();
-                        if (d && !d.isDeleted) {
-                            // Auto-heal: Jika ada bukti foto tetapi status ALPA atau jamMasuk --:--, pulihkan sebagai Hadir
-                            const hasFoto = this.isPresensiAdaFoto(d);
-                            const isAlpa = (d.status || '').toUpperCase() === 'ALPA';
-                            const isBlankMasuk = (!d.jamMasuk || d.jamMasuk === '--:--' || d.jamMasuk === '-') && (!d.jam_masuk || d.jam_masuk === '--:--' || d.jam_masuk === '-');
-                            
-                            if (hasFoto && (isAlpa || isBlankMasuk)) {
-                                const gInfo = (this.mockData.dataGuru || []).find(g => 
-                                    (g.id && g.id === d.nip) || 
-                                    (g.username && g.username === d.nip) || 
-                                    (g.nip && g.nip === d.nip) || 
-                                    (g.nama && d.namaGuru && g.nama.trim().toLowerCase() === d.namaGuru.trim().toLowerCase())
-                                );
-                                 const shiftInfo = this.getShiftKerjaConfig(gInfo, d.tanggal);
-                                if (isBlankMasuk) {
-                                    const defaultMasuk = shiftInfo.masuk;
-                                    d.jamMasuk = defaultMasuk;
-                                    d.jam_masuk = defaultMasuk;
-                                }
-                                if (isAlpa) {
-                                    d.status = 'Hadir';
-                                }
-                                d.keterangan = 'Presensi Masuk Tercatat';
-                                
-                                // Sync perbaikan balik ke Firestore
-                                try {
-                                    if (typeof db !== 'undefined' && doc.id) {
-                                        db.collection('presensi_guru').doc(doc.id).set({
-                                            jamMasuk: d.jamMasuk,
-                                            jam_masuk: d.jamMasuk,
-                                            status: d.status,
-                                            keterangan: d.keterangan
-                                        }, { merge: true }).catch(() => {});
-                                    }
-                                } catch(e) {}
-                            }
-                            koleksiRiwayat.push(d);
-                        }
-                    });
-                }
-                
-                // Gunakan koleksiRiwayat dari Firestore sebagai data aktual
-                this.mockData.riwayat = koleksiRiwayat.sort((a,b) => {
-                    let dateA = (a.tanggal || '').split('/').reverse().join('');
-                    let dateB = (b.tanggal || '').split('/').reverse().join('');
-                    return dateB.localeCompare(dateA);
-                });
-                delete this.mockData.riwayatLamaMainState;
-                
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
-                
-                if (this.state) {
-                    if (this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
-                    if (this.state.currentScreen === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
-                    if (this.state.currentScreen === 'admin-riwayat' && typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
-                    if (this.state.currentScreen === 'guru-riwayat' && typeof this.loadRiwayatGuru === 'function') this.loadRiwayatGuru();
-                    if (this.state.currentScreen === 'guru-dashboard' && typeof this.loadDashboardGuruData === 'function' && this.state.currentUser) this.loadDashboardGuruData(this.state.currentUser);
-                }
-            }, (error) => {
-                this.handleFirebaseError(error, 'presensi_guru');
-            });
-
             // TAHAP 2: Mendengarkan koleksi data_guru yang baru
             this._unsubGuru = db.collection('data_guru').onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
                 const dariCache = !!(snapshot && snapshot.metadata && snapshot.metadata.fromCache);
@@ -1101,7 +1165,7 @@ var app = {
                 }
 
                 try {
-                    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                    app.simpanLokal();
                 } catch(e) {}
 
                 if (this.state && this.state.currentScreen === 'admin-guru' && typeof this.renderDataGuru === 'function') {
@@ -1121,7 +1185,7 @@ var app = {
             this._unsubPengaturanSekolah = db.collection('pengaturan').doc('sekolah').onSnapshot((doc) => {
                 if (doc.exists) {
                     this.mockData.schoolSettings = { ...this.mockData.schoolSettings, ...doc.data() };
-                    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                    app.simpanLokal();
                     if (typeof this.applySchoolBrand === 'function') {
                         this.applySchoolBrand();
                     }
@@ -1143,55 +1207,13 @@ var app = {
                             radius: parseInt(this.mockData.lokasiDanJamKerja.radius) || 100
                         };
                     }
-                    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                    app.simpanLokal();
                     if (this.state && this.state.currentScreen === 'admin-lokasi' && typeof this.renderPengaturanLokasi === 'function') {
                         this.renderPengaturanLokasi();
                     }
                 }
             }, (error) => {
                 this.handleFirebaseError(error, 'pengaturan/lokasi');
-            });
-
-            // TAHAP 3: Mendengarkan koleksi izin_guru
-            this._unsubIzin = db.collection('izin_guru').onSnapshot((snapshot) => {
-                let koleksi = [];
-                if (snapshot) {
-                    snapshot.forEach(doc => {
-                        const d = doc.data();
-                        if (d && !d.isDeleted) koleksi.push(d);
-                    });
-                }
-                this.mockData.izinAdmin = koleksi.sort((a,b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
-                this.mockData.izin = this.mockData.izinAdmin;
-                delete this.mockData.izinLamaMainState;
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
-                if (this.state) {
-                    if (this.state.currentScreen === 'admin-izin' && typeof this.loadIzinAdmin === 'function') this.loadIzinAdmin();
-                    if (this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
-                    if (this.state.currentScreen === 'guru-izin' && typeof this.loadIzinGuru === 'function') this.loadIzinGuru();
-                }
-            }, (error) => {
-                this.handleFirebaseError(error, 'izin_guru');
-            });
-
-            // TAHAP 3: Mendengarkan koleksi jurnal_guru
-            this._unsubJurnal = db.collection('jurnal_guru').onSnapshot((snapshot) => {
-                let koleksi = [];
-                if (snapshot) {
-                    snapshot.forEach(doc => {
-                        const d = doc.data();
-                        if (d && !d.isDeleted) koleksi.push(d);
-                    });
-                }
-                this.mockData.jurnal = koleksi.sort((a,b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
-                delete this.mockData.jurnalLamaMainState;
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
-                if (this.state) {
-                    if (this.state.currentScreen === 'admin-jurnal' && typeof this.loadJurnalAdmin === 'function') this.loadJurnalAdmin();
-                    if (this.state.currentScreen === 'guru-jurnal' && typeof this.loadJurnalGuru === 'function') this.loadJurnalGuru();
-                }
-            }, (error) => {
-                this.handleFirebaseError(error, 'jurnal_guru');
             });
 
             // TAHAP 3: Mendengarkan koleksi slip_gaji
@@ -1205,7 +1227,7 @@ var app = {
                 }
                 this.mockData.slipGaji = koleksi.sort((a,b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
                 delete this.mockData.slipLamaMainState;
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                app.simpanLokal();
                 if (this.state) {
                     if (this.state.currentScreen === 'admin-upload-slip' && typeof this.loadSlipAdmin === 'function') this.loadSlipAdmin();
                     if (this.state.currentScreen === 'guru-slip-gaji' && typeof this.loadSlipGuru === 'function') this.loadSlipGuru();
@@ -1214,8 +1236,263 @@ var app = {
                 this.handleFirebaseError(error, 'slip_gaji');
             });
 
+            // Presensi, izin, dan jurnal dipantau sesuai pengguna yang login
+            this.mulaiPantauDataPengguna();
+
         } catch (e) {
             console.error("Firebase tidak terinisialisasi dengan benar", e);
+        }
+    },
+
+    // ==========================================
+    // PEMANTAUAN DATA SESUAI PENGGUNA
+    // Agar hemat kuota & memori untuk sekolah dengan banyak guru:
+    // - Presensi diambil per bulan (bulan berjalan + bulan yang sedang dilihat)
+    // - Guru hanya mengambil data miliknya sendiri
+    // ==========================================
+    penggunaLogin() {
+        if (this.state && this.state.currentUser) return this.state.currentUser;
+        try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch (e) { return null; }
+    },
+
+    isAdminLogin() {
+        const u = this.penggunaLogin();
+        return !!(u && String(u.role || '').toUpperCase() === 'ADMIN');
+    },
+
+    idPresensiSaya() {
+        const u = this.penggunaLogin();
+        return u ? (u.username || u.nip || u.id || null) : null;
+    },
+
+    kunciBulan(tahun, bulan) {
+        return `${tahun}${String(bulan).padStart(2, '0')}`;
+    },
+
+    bulanPresensiSinkron(tahun, bulan) {
+        return !!(this._bulanSinkron && this._bulanSinkron[this.kunciBulan(tahun, bulan)]);
+    },
+
+    hentikanPantauDataPengguna() {
+        Object.values(this._subPresensi || {}).forEach(fn => { try { fn(); } catch (e) {} });
+        this._subPresensi = {};
+        this._dataPresensiBulan = {};
+        this._bulanSinkron = {};
+        ['_unsubIzin', '_unsubJurnal'].forEach(k => {
+            if (typeof this[k] === 'function') { try { this[k](); } catch (e) {} }
+            this[k] = null;
+        });
+        if (this.state) this.state.presensiSynced = false;
+        this._pemantauUntuk = null;
+    },
+
+    mulaiPantauDataPengguna() {
+        if (typeof db === 'undefined' || !db) return;
+        const u = this.penggunaLogin();
+        const kunciPengguna = u ? (String(u.role || '') + ':' + (u.username || u.id || '')) : null;
+        if (this._pemantauUntuk && this._pemantauUntuk === kunciPengguna) return; // sudah berjalan
+        const gantiPengguna = !!this._pemantauUntuk;
+        this.hentikanPantauDataPengguna();
+        if (gantiPengguna) {
+            this.mockData.riwayat = [];
+            this.mockData.izinAdmin = [];
+            this.mockData.izin = [];
+            this.mockData.jurnal = [];
+        }
+        if (!u) return;
+        this._pemantauUntuk = kunciPengguna;
+        const now = new Date();
+        this.pastikanBulanPresensi(now.getFullYear(), now.getMonth() + 1);
+        this.pantauIzin(u);
+        this.pantauJurnal(u);
+    },
+
+    // Pastikan data presensi bulan tertentu dipantau. Mengembalikan true jika data bulan itu sudah siap.
+    pastikanBulanPresensi(tahun, bulan) {
+        if (typeof db === 'undefined' || !db) return true;
+        const u = this.penggunaLogin();
+        if (!u || !tahun || !bulan) return false;
+        const key = this.kunciBulan(Number(tahun), Number(bulan));
+        this._subPresensi = this._subPresensi || {};
+        this._dataPresensiBulan = this._dataPresensiBulan || {};
+        this._bulanSinkron = this._bulanSinkron || {};
+        if (this._subPresensi[key]) return !!this._bulanSinkron[key];
+
+        // Batasi jumlah bulan yang dipantau: bulan berjalan + maksimal 2 bulan lain
+        const now = new Date();
+        const keyNow = this.kunciBulan(now.getFullYear(), now.getMonth() + 1);
+        const lain = Object.keys(this._subPresensi).filter(k => k !== keyNow);
+        if (key !== keyNow && lain.length >= 2) {
+            const buang = lain[0];
+            try { this._subPresensi[buang](); } catch (e) {}
+            delete this._subPresensi[buang];
+            delete this._dataPresensiBulan[buang];
+            delete this._bulanSinkron[buang];
+        }
+        this._subPresensi[key] = this.langgananPresensiBulan(key, u, false);
+        return false;
+    },
+
+    langgananPresensiBulan(key, u, modeCadangan) {
+        const admin = String(u.role || '').toUpperCase() === 'ADMIN';
+        let q = db.collection('presensi_guru');
+        if (!admin) q = q.where('nip', '==', this.idPresensiSaya());
+        if (!modeCadangan) {
+            // ID dokumen berformat YYYYMMDD_nip, jadi bisa diambil per bulan berdasarkan awalan ID
+            const docId = firebase.firestore.FieldPath.documentId();
+            q = q.orderBy(docId).startAt(key).endAt(key + '\uf8ff');
+        }
+        return q.onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
+            const dariCache = !!(snapshot.metadata && snapshot.metadata.fromCache);
+            if (dariCache && snapshot.empty) return; // tunggu data dari server
+            const list = [];
+            snapshot.forEach(doc => {
+                if (modeCadangan && !String(doc.id).startsWith(key)) return;
+                const d = doc.data();
+                if (!d || d.isDeleted) return;
+                d._id = doc.id;
+                this.autoHealPresensi(d, doc.id);
+                list.push(d);
+            });
+            this._dataPresensiBulan[key] = list;
+            if (!dariCache) {
+                this._bulanSinkron[key] = true;
+                const now = new Date();
+                if (key === this.kunciBulan(now.getFullYear(), now.getMonth() + 1)) this.state.presensiSynced = true;
+            }
+            this.gabungRiwayat();
+            this.refreshLayarPresensi();
+        }, (error) => {
+            if (!modeCadangan && error && error.code === 'failed-precondition') {
+                // Index belum tersedia: pakai kueri sederhana lalu saring di perangkat
+                console.warn('Kueri presensi per bulan memakai mode cadangan:', error.message);
+                if (this._subPresensi && this._subPresensi[key]) {
+                    this._subPresensi[key] = this.langgananPresensiBulan(key, u, true);
+                }
+                return;
+            }
+            this.handleFirebaseError(error, 'presensi_guru');
+        });
+    },
+
+    // Jika ada bukti foto tetapi status ALPA atau jam masuk kosong, pulihkan sebagai Hadir
+    autoHealPresensi(d, docId) {
+        const hasFoto = this.isPresensiAdaFoto(d);
+        const isAlpa = (d.status || '').toUpperCase() === 'ALPA';
+        const isBlankMasuk = (!d.jamMasuk || d.jamMasuk === '--:--' || d.jamMasuk === '-') && (!d.jam_masuk || d.jam_masuk === '--:--' || d.jam_masuk === '-');
+        if (!hasFoto || !(isAlpa || isBlankMasuk)) return;
+        const gInfo = (this.mockData.dataGuru || []).find(g =>
+            (g.id && g.id === d.nip) || (g.username && g.username === d.nip) || (g.nip && g.nip === d.nip) ||
+            (g.nama && d.namaGuru && g.nama.trim().toLowerCase() === d.namaGuru.trim().toLowerCase())
+        );
+        const shiftInfo = this.getShiftKerjaConfig(gInfo, d.tanggal);
+        if (isBlankMasuk) {
+            d.jamMasuk = shiftInfo.masuk;
+            d.jam_masuk = shiftInfo.masuk;
+        }
+        if (isAlpa) d.status = 'Hadir';
+        d.keterangan = 'Presensi Masuk Tercatat';
+        // Perbaikan ke database cukup dilakukan perangkat admin
+        if (this.isAdminLogin() && typeof db !== 'undefined' && docId && !this.state.firebasePermissionError) {
+            db.collection('presensi_guru').doc(docId).set({
+                jamMasuk: d.jamMasuk, jam_masuk: d.jamMasuk, status: d.status, keterangan: d.keterangan
+            }, { merge: true }).catch(() => {});
+        }
+    },
+
+    gabungRiwayat() {
+        const semua = [];
+        Object.values(this._dataPresensiBulan || {}).forEach(list => semua.push(...list));
+        this.mockData.riwayat = semua.sort((a, b) => {
+            const dateA = (a.tanggal || '').split('/').reverse().join('');
+            const dateB = (b.tanggal || '').split('/').reverse().join('');
+            return dateB.localeCompare(dateA);
+        });
+        delete this.mockData.riwayatLamaMainState;
+        this.simpanLokal();
+    },
+
+    refreshLayarPresensi() {
+        if (!this.state) return;
+        const s = this.state.currentScreen;
+        if (s === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
+        if (s === 'admin-rekap' && typeof this.loadRekapAdmin === 'function') this.loadRekapAdmin();
+        if (s === 'admin-riwayat' && typeof this.loadRiwayatAdmin === 'function') this.loadRiwayatAdmin();
+        if (s === 'guru-riwayat' && typeof this.loadRiwayatGuru === 'function') this.loadRiwayatGuru();
+        if (s === 'guru-dashboard' && typeof this.loadDashboardGuruData === 'function' && this.state.currentUser) this.loadDashboardGuruData(this.state.currentUser);
+    },
+
+    pantauIzin(u) {
+        const admin = String(u.role || '').toUpperCase() === 'ADMIN';
+        let q = db.collection('izin_guru');
+        if (!admin) q = q.where('nip', '==', this.idPresensiSaya());
+        this._unsubIzin = q.onSnapshot((snapshot) => {
+            const koleksi = [];
+            snapshot.forEach(doc => {
+                const d = doc.data();
+                if (d && !d.isDeleted) koleksi.push(d);
+            });
+            this.mockData.izinAdmin = koleksi.sort((a, b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
+            this.mockData.izin = this.mockData.izinAdmin;
+            delete this.mockData.izinLamaMainState;
+            this.simpanLokal();
+            if (this.state) {
+                if (this.state.currentScreen === 'admin-izin' && typeof this.loadIzinAdmin === 'function') this.loadIzinAdmin();
+                if (this.state.currentScreen === 'admin-dashboard' && typeof this.loadDashboardAdmin === 'function') this.loadDashboardAdmin();
+                if (this.state.currentScreen === 'guru-izin' && typeof this.loadIzinGuru === 'function') this.loadIzinGuru();
+            }
+        }, (error) => {
+            this.handleFirebaseError(error, 'izin_guru');
+        });
+    },
+
+    pantauJurnal(u) {
+        const admin = String(u.role || '').toUpperCase() === 'ADMIN';
+        // Admin: 300 jurnal terbaru. Guru: hanya jurnal miliknya.
+        const q = admin
+            ? db.collection('jurnal_guru').orderBy('timestamp', 'desc').limit(300)
+            : db.collection('jurnal_guru').where('username', '==', u.username || u.id || '');
+        this._unsubJurnal = q.onSnapshot((snapshot) => {
+            const koleksi = [];
+            snapshot.forEach(doc => {
+                const d = doc.data();
+                if (d && !d.isDeleted) koleksi.push(d);
+            });
+            this.mockData.jurnal = koleksi.sort((a, b) => this.toTimestampMs(b.timestamp) - this.toTimestampMs(a.timestamp));
+            delete this.mockData.jurnalLamaMainState;
+            this.simpanLokal();
+            if (this.state) {
+                if (this.state.currentScreen === 'admin-jurnal' && typeof this.loadJurnalAdmin === 'function') this.loadJurnalAdmin();
+                if (this.state.currentScreen === 'guru-jurnal' && typeof this.loadJurnalGuru === 'function') this.loadJurnalGuru();
+            }
+        }, (error) => {
+            this.handleFirebaseError(error, 'jurnal_guru');
+        });
+    },
+
+    // Simpan salinan ringan data ke perangkat (tanpa foto & lampiran agar tidak melebihi batas memori browser)
+    simpanLokal() {
+        if (typeof APP_STORAGE_KEY === 'undefined' || !APP_STORAGE_KEY) return;
+        try {
+            const ringan = { ...this.mockData };
+            const buangBerat = (list, fields) => Array.isArray(list)
+                ? list.map(x => {
+                    if (!x || typeof x !== 'object') return x;
+                    const c = { ...x };
+                    fields.forEach(f => { if (typeof c[f] === 'string' && c[f].length > 2000) delete c[f]; });
+                    return c;
+                })
+                : list;
+            ringan.riwayat = buangBerat(ringan.riwayat, ['fotoMasuk', 'fotoPulang', 'foto_masuk', 'foto_pulang', 'foto']);
+            ringan.jurnal = buangBerat(ringan.jurnal, ['foto']);
+            ringan.izinAdmin = buangBerat(ringan.izinAdmin, ['lampiranUrl']);
+            ringan.izin = ringan.izinAdmin;
+            ringan.dataGuru = buangBerat(ringan.dataGuru, ['fotoUrl']);
+            delete ringan.dataGuruLamaMainState;
+            delete ringan.riwayatLamaMainState;
+            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(ringan));
+        } catch (e) {
+            console.warn('Penyimpanan lokal penuh / tidak tersedia:', e && e.name);
         }
     },
 
@@ -1577,7 +1854,7 @@ service cloud.firestore {
             }
         });
         if (changed) {
-            try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData)); } catch(e){}
+            try { app.simpanLokal(); } catch(e){}
         }
     },
 
@@ -1654,6 +1931,7 @@ service cloud.firestore {
 
     hapusDokumenFirestorePresensi(r) {
         if (!r || !r.tanggal || !r.nip || typeof db === 'undefined' || this.state.firebasePermissionError) return;
+        if (!this.isAdminLogin()) return; // hanya admin yang boleh menghapus data presensi
         try {
             const parts = r.tanggal.split('/');
             if (parts.length === 3) {
@@ -1775,7 +2053,7 @@ service cloud.firestore {
 
         if (this.mockData.riwayat.length !== initialCount || hasChanges) {
             hasChanges = true;
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
         }
 
         return hasChanges;
@@ -1785,7 +2063,9 @@ service cloud.firestore {
         if (!this.mockData || !this.mockData.dataGuru || !this.mockData.riwayat) return;
         // Jangan buat ALPA sebelum data guru & presensi dari server selesai dimuat,
         // agar tidak mencatat ALPA untuk guru yang tidak terdaftar atau yang sebenarnya sudah presensi
-        if (typeof db !== 'undefined' && this.state && (!this.state.guruSynced || !this.state.presensiSynced)) return;
+        if (typeof db !== 'undefined' && this.state && !this.state.guruSynced) return;
+        // ALPA otomatis cukup dihitung & ditulis oleh perangkat admin (bukan setiap HP guru)
+        if (typeof db !== 'undefined' && !this.isAdminLogin()) return;
 
         // Bersihkan terlebih dahulu ALPA tidak valid (sebelum tanggal mulai atau sebelum akun guru dibuat)
         this.bersihkanAlpaTidakValid();
@@ -1814,6 +2094,12 @@ service cloud.firestore {
             if (checkYear < startYear || (checkYear === startYear && checkMonth < startMonth)) {
                 return;
             }
+        }
+
+        // Data presensi bulan ini harus sudah dimuat dari server sebelum ALPA dihitung
+        if (typeof db !== 'undefined' && !this.bulanPresensiSinkron(checkYear, checkMonth)) {
+            this.pastikanBulanPresensi(checkYear, checkMonth);
+            return;
         }
 
         const isCurrentMonth = (checkYear === currentYear && checkMonth === currentMonth);
@@ -2046,7 +2332,7 @@ service cloud.firestore {
                                                 jam_masuk: alpaRecord.jamMasuk
                                             }, { merge: true }).catch(() => {});
                                         }
-                                        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                                        app.simpanLokal();
                                         return;
                                     }
                                 }
@@ -2061,7 +2347,7 @@ service cloud.firestore {
         }
 
         if (hasChanges) {
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
         }
     },
 
@@ -2112,8 +2398,8 @@ service cloud.firestore {
     navigate(screenId) {
         // Proteksi route (Frontend Check)
         if (screenId !== 'login') {
-            const token = localStorage.getItem('session_token');
-            const userStr = localStorage.getItem('user_info');
+            const token = localStorage.getItem(SESSION_KEY);
+            const userStr = localStorage.getItem(USER_KEY);
             
             if (!token || !userStr) {
                 screenId = 'login'; // Paksa ke login jika belum ada session
@@ -2259,9 +2545,11 @@ service cloud.firestore {
             
             if(res.success) {
                 // Simpan session info di localStorage
-                localStorage.setItem('session_token', res.token);
-                localStorage.setItem('user_info', JSON.stringify(res.user));
+                localStorage.setItem(SESSION_KEY, res.token);
+                localStorage.setItem(USER_KEY, JSON.stringify(res.user));
                 this.state.currentUser = res.user;
+                // Mulai ambil data presensi/izin/jurnal sesuai pengguna ini
+                this.mulaiPantauDataPengguna();
                 
                 this.showToast('Login berhasil', 'check_circle', 'text-green-400');
                 
@@ -2333,12 +2621,15 @@ service cloud.firestore {
     },
 
     logout() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         
         const finishLogout = () => {
-            localStorage.removeItem('session_token');
-            localStorage.removeItem('user_info');
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(USER_KEY);
             this.state.currentUser = null;
+            // Hentikan pengambilan data milik pengguna sebelumnya
+            this.mulaiPantauDataPengguna();
+            this.simpanLokal();
             this.navigate('login');
             this.showToast('Berhasil logout', 'info', 'text-blue-400');
         };
@@ -2362,8 +2653,8 @@ service cloud.firestore {
 
         // Jika akun guru dinonaktifkan admin, keluarkan dari sesi
         if (latestGuru !== user && String(latestGuru.statusAkun || 'Aktif').toLowerCase() === 'nonaktif') {
-            localStorage.removeItem('session_token');
-            localStorage.removeItem('user_info');
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(USER_KEY);
             this.state.currentUser = null;
             // Ditunda agar tidak bentrok dengan navigate() yang sedang berjalan
             setTimeout(() => {
@@ -2388,7 +2679,7 @@ service cloud.firestore {
             const updatedUser = { ...user, ...latestGuru };
             this.state.currentUser = updatedUser;
             try {
-                localStorage.setItem('user_info', JSON.stringify(updatedUser));
+                localStorage.setItem(USER_KEY, JSON.stringify(updatedUser));
             } catch(e) {}
         }
 
@@ -2406,7 +2697,7 @@ service cloud.firestore {
                             if (d.nip) document.getElementById('guru-dashboard-nip').innerText = `NIP: ${(d.nip && d.nip !== '-') ? d.nip : '-'}`;
                             const updatedUser = { ...user, ...d };
                             this.state.currentUser = updatedUser;
-                            try { localStorage.setItem('user_info', JSON.stringify(updatedUser)); } catch(e) {}
+                            try { localStorage.setItem(USER_KEY, JSON.stringify(updatedUser)); } catch(e) {}
                         }
                     } else if (cleanUsername) {
                         db.collection('data_guru').where('username', '==', cleanUsername).limit(1).get().then(snap => {
@@ -2418,7 +2709,7 @@ service cloud.firestore {
                                     if (d.nip) document.getElementById('guru-dashboard-nip').innerText = `NIP: ${(d.nip && d.nip !== '-') ? d.nip : '-'}`;
                                     const updatedUser = { ...user, ...d };
                                     this.state.currentUser = updatedUser;
-                                    try { localStorage.setItem('user_info', JSON.stringify(updatedUser)); } catch(e) {}
+                                    try { localStorage.setItem(USER_KEY, JSON.stringify(updatedUser)); } catch(e) {}
                                 }
                             }
                         }).catch(() => {});
@@ -2463,7 +2754,7 @@ service cloud.firestore {
             }
         }
 
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         
         const onSuccess = (res) => {
             if(res.success) {
@@ -2530,7 +2821,7 @@ service cloud.firestore {
             const todayStr = `${hariArr[now.getDay()]}, ${now.getDate()} ${bulanArr[now.getMonth()]} ${now.getFullYear()}`;
             
             const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
-            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
             const myNip = userInfo.username || userInfo.nip;
             const myNama = userInfo.nama || '';
 
@@ -2876,8 +3167,8 @@ service cloud.firestore {
         // Isi data konfirmasi
         document.getElementById('preview-foto').src = dataUrl;
         
-        const user = JSON.parse(localStorage.getItem('user_info'));
-        const now = new Date();
+        const user = JSON.parse(localStorage.getItem(USER_KEY));
+        const now = this.waktuSekarang();
         document.getElementById('konf-nama').innerText = `: ${user.nama}`;
         document.getElementById('konf-tgl').innerText = `: ${now.toLocaleDateString('id-ID')}`;
         document.getElementById('konf-jam').innerText = `: ${now.toLocaleTimeString('id-ID').substring(0,5)} WIB`;
@@ -2894,7 +3185,7 @@ service cloud.firestore {
     },
 
     cekKondisiPresensi() {
-        const jamSekarang = new Date();
+        const jamSekarang = this.waktuSekarang();
         const strJam = jamSekarang.toLocaleTimeString('id-ID').substring(0,5);
         const jarak = this.presensiState.jarak;
         const radius = this.presensiState.LOKASI_SEKOLAH.radius;
@@ -2904,7 +3195,7 @@ service cloud.firestore {
         let isPulangCepat = false;
 
         // Ambil profil guru untuk mengecek shift
-        const currentUser = this.state.currentUser || JSON.parse(localStorage.getItem('user_info') || '{}');
+        const currentUser = this.state.currentUser || JSON.parse(localStorage.getItem(USER_KEY) || '{}');
         if (!currentUser || (!currentUser.id && !currentUser.username && !currentUser.nip)) {
             this.showToast('Gagal memuat profil pengguna. Silakan login ulang.', 'error', 'text-red-400');
             return;
@@ -2986,7 +3277,7 @@ service cloud.firestore {
         const btn = document.getElementById('btn-kirim-presensi');
         const icon = document.getElementById('icon-kirim-presensi');
         const text = document.getElementById('text-kirim-presensi');
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
 
         // UI Loading
         btn.disabled = true;
@@ -3039,8 +3330,9 @@ service cloud.firestore {
             // MOCK LOGIC LOCALHOST
             // TAHAP 1: ARSITEKTUR KOLEKSI TERPISAH (TANPA ANTRIAN & SUPER CEPAT)
             setTimeout(async () => {
-                const now = new Date();
-                const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+                // Jam diambil dari jam server (bukan jam HP) agar tidak bisa dicurangi
+                const now = this.waktuSekarang();
+                const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
                 const tglString = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth()+1).toString().padStart(2, '0')}/${now.getFullYear()}`;
                 
                 // Format ID Unik per Guru per Hari (Misal: 20261011_GURU001)
@@ -3070,7 +3362,10 @@ service cloud.firestore {
                             const nowMin = now.getMinutes().toString().padStart(2, '0');
                             updatePayload.jamMasuk = `${nowHour}:${nowMin}`;
                             updatePayload.jam_masuk = `${nowHour}:${nowMin}`;
-                            updatePayload.fotoMasuk = payload.foto;
+                            // Foto disimpan terpisah di koleksi foto_presensi (hemat kuota), di sini cukup penanda
+                            updatePayload.adaFotoMasuk = !!payload.foto;
+                            updatePayload.waktuServerMasuk = firebase.firestore.FieldValue.serverTimestamp();
+                            updatePayload.selisihJamHpDetik = this.selisihJamHpDetik();
                             updatePayload.jarakMasuk = payload.jarak;
                             updatePayload.status = payload.status === 'HADIR' ? 'Hadir' : (payload.status.includes('TERLAMBAT') ? 'Terlambat' : 'Di Luar Lokasi');
                             updatePayload.keterangan = 'Presensi Masuk Tercatat';
@@ -3084,7 +3379,7 @@ service cloud.firestore {
                             if (!existingLocal || !existingLocal.jamPulang) {
                                 updatePayload.jamPulang = '--:--';
                                 updatePayload.jam_pulang = '--:--';
-                                updatePayload.fotoPulang = '';
+                                updatePayload.adaFotoPulang = false;
                                 updatePayload.jarakPulang = null;
                             }
                         } else if (payload.tipe === 'Pulang') {
@@ -3092,7 +3387,8 @@ service cloud.firestore {
                             const nowMin = now.getMinutes().toString().padStart(2, '0');
                             updatePayload.jamPulang = `${nowHour}:${nowMin}`;
                             updatePayload.jam_pulang = `${nowHour}:${nowMin}`;
-                            updatePayload.fotoPulang = payload.foto;
+                            updatePayload.adaFotoPulang = !!payload.foto;
+                            updatePayload.waktuServerPulang = firebase.firestore.FieldValue.serverTimestamp();
                             updatePayload.jarakPulang = payload.jarak;
                             // Simpan alasan & kondisi khusus presensi pulang (pulang cepat / di luar lokasi)
                             updatePayload.kondisiPulang = payload.status === 'HADIR' ? '' : payload.status;
@@ -3108,14 +3404,25 @@ service cloud.firestore {
                         }
 
                         // Optimistic Update UI (Biar gak usah direfresh)
+                        const salinanLokal = { ...updatePayload, _id: docId };
+                        delete salinanLokal.waktuServerMasuk;
+                        delete salinanLokal.waktuServerPulang;
                         if (existingLocal) {
-                            Object.assign(existingLocal, updatePayload);
+                            Object.assign(existingLocal, salinanLokal);
                         } else {
-                            this.mockData.riwayat.unshift(updatePayload);
+                            this.mockData.riwayat.unshift(salinanLokal);
                         }
-                        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                        app.simpanLokal();
 
-                        // 3. Tulis langsung ke server tanpa antrean (Metode Fire & Forget)
+                        // 3. Simpan foto ke koleksi terpisah, lalu data presensi
+                        if (payload.foto) {
+                            const fotoField = payload.tipe === 'Pulang' ? 'fotoPulang' : 'fotoMasuk';
+                            await db.collection('foto_presensi').doc(docId).set({
+                                [fotoField]: payload.foto,
+                                nip: updatePayload.nip,
+                                tanggal: tglString
+                            }, { merge: true });
+                        }
                         await docRef.set(updatePayload, { merge: true });
                         onSuccess({ success: true, message: `Presensi ${payload.tipe} berhasil dikirim!` });
                         return;
@@ -3247,7 +3554,11 @@ service cloud.firestore {
     applySchoolBrand() {
         if (!this.mockData || !this.mockData.schoolSettings) return;
         const s = this.mockData.schoolSettings;
-        const rawNama = (s.namaSekolah || '').trim();
+        let rawNama = (s.namaSekolah || '').trim();
+        // Jika admin belum mengisi nama sekolah, pakai nama dari daftar sekolah
+        if ((!rawNama || rawNama === 'Nama Sekolah') && window.SEKOLAH && window.SEKOLAH.nama) {
+            rawNama = window.SEKOLAH.nama;
+        }
         const displaySchoolName = (rawNama && rawNama !== 'Nama Sekolah') ? rawNama : 'Presensi Guru';
         const logoUrl = (s.logoSekolahUrl || '').trim();
         const hasLogo = !!logoUrl;
@@ -3416,7 +3727,7 @@ service cloud.firestore {
             this.mockData.lastResetYear = now.getFullYear();
 
             // Simpan data bersih ke LocalStorage
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
 
             // 2. Fungsi helper batch delete Firestore
             const clearCollection = async (collectionName) => {
@@ -3636,10 +3947,52 @@ service cloud.firestore {
 
     isPresensiAdaFoto(r) {
         if (!r) return false;
+        // Data baru: foto ada di koleksi foto_presensi, dokumen presensi hanya menyimpan penanda
+        if (r.adaFotoMasuk === true || r.adaFotoPulang === true) return true;
         const fm = r.fotoMasuk || r.foto_masuk || r.foto;
         const fp = r.fotoPulang || r.foto_pulang;
         const isValid = (v) => v && typeof v === 'string' && v.trim() !== '' && v !== '-' && v !== '#';
         return !!(isValid(fm) || isValid(fp));
+    },
+
+    // Sumber foto untuk tombol "Foto": data lama (foto langsung) atau penunjuk ke koleksi foto_presensi
+    sumberFotoPresensi(r, jenis) {
+        if (!r) return '';
+        const lama = jenis === 'pulang' ? (r.fotoPulang || r.foto_pulang) : (r.fotoMasuk || r.foto_masuk || r.foto);
+        if (lama && typeof lama === 'string' && lama !== '#' && lama !== '-') return lama;
+        const ada = jenis === 'pulang' ? r.adaFotoPulang : r.adaFotoMasuk;
+        const id = r._id || (() => {
+            const p = (r.tanggal || '').split('/');
+            return p.length === 3 && r.nip ? `${p[2]}${p[1]}${p[0]}_${r.nip}` : '';
+        })();
+        return ada && id ? `doc:${id}:${jenis}` : '';
+    },
+
+    // ==========================================
+    // JAM SERVER (agar jam presensi tidak bisa dicurangi lewat jam HP)
+    // ==========================================
+    sinkronJamServer() {
+        try {
+            const mulai = Date.now();
+            fetch('/manifest.json?jam=' + mulai, { method: 'HEAD', cache: 'no-store' })
+                .then(res => {
+                    const tgl = res.headers.get('Date');
+                    if (!tgl) return;
+                    const server = new Date(tgl).getTime();
+                    if (isNaN(server)) return;
+                    const jeda = (Date.now() - mulai) / 2;
+                    this._selisihJamMs = server + jeda - Date.now();
+                })
+                .catch(() => {});
+        } catch (e) {}
+    },
+
+    waktuSekarang() {
+        return new Date(Date.now() + (this._selisihJamMs || 0));
+    },
+
+    selisihJamHpDetik() {
+        return Math.round((this._selisihJamMs || 0) / 1000);
     },
 
     renderHariLibur() {
@@ -3662,7 +4015,7 @@ service cloud.firestore {
         const libur = rawLibur.filter(t => t && (typeof t === 'string' || typeof t === 'object') && !JSON.stringify(t).includes('${') && !JSON.stringify(t).includes('undefined'));
         if (libur.length !== rawLibur.length) {
             this.mockData.schoolSettings.hariLibur = libur;
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             try { if (typeof db !== 'undefined') db.collection('pengaturan').doc('sekolah').set(this.mockData.schoolSettings, { merge: true }); } catch(e) {}
         }
         
@@ -3718,7 +4071,7 @@ service cloud.firestore {
 
         if (!this.mockData.schoolSettings) this.mockData.schoolSettings = {};
         this.mockData.schoolSettings.hariLiburMingguan = selected;
-        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+        app.simpanLokal();
 
         try {
             if (typeof db !== 'undefined') {
@@ -3767,7 +4120,7 @@ service cloud.firestore {
             tanggal: formattedDate,
             keterangan: ket
         });
-        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+        app.simpanLokal();
         
         // Simpan ke Firestore
         try { 
@@ -3794,7 +4147,7 @@ service cloud.firestore {
             if (!this.mockData.schoolSettings || !this.mockData.schoolSettings.hariLibur) return;
             const deletedItem = this.mockData.schoolSettings.hariLibur[index];
             this.mockData.schoolSettings.hariLibur.splice(index, 1);
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             
             // Simpan ke Firestore
             try { 
@@ -3860,7 +4213,7 @@ service cloud.firestore {
                     this.mockData.schoolSettings.logoSekolahUrl = dataUrl;
                     
                     // Simpan seketika ke LocalStorage
-                    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                    app.simpanLokal();
                     
                     // Perbarui tampilan di seluruh layar (Admin Sidebar, Login, Dashboard Guru, Preview Kop)
                     this.updatePreviewKop();
@@ -3885,7 +4238,7 @@ service cloud.firestore {
                     if (ph) ph.classList.add('hidden');
                     
                     this.mockData.schoolSettings.logoKabKotaUrl = dataUrl;
-                    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                    app.simpanLokal();
                     this.updatePreviewKop();
                     
                     if (typeof db !== 'undefined') {
@@ -3900,7 +4253,7 @@ service cloud.firestore {
                     const adminFoto = document.getElementById('set-admin-foto');
                     if (adminFoto) adminFoto.src = dataUrl;
                     this.mockData.adminProfile.fotoUrl = dataUrl;
-                    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                    app.simpanLokal();
                     
                     // Update admin topbar avatars
                     document.querySelectorAll('.admin-topbar-avatar').forEach(img => img.src = dataUrl);
@@ -4041,7 +4394,7 @@ service cloud.firestore {
         this.autoGenerateAlpa();
 
         // Simpan seketika ke LocalStorage
-        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+        app.simpanLokal();
         
         // Perbarui tampilan seluruh antarmuka
         this.updatePreviewKop();
@@ -4131,7 +4484,7 @@ service cloud.firestore {
             document.querySelectorAll('.admin-topbar-avatar').forEach(el => el.src = p.fotoUrl);
             
             // Simpan ke localStorage agar tidak hilang saat reload
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             
             btn.innerHTML = oHtml;
             this.showToast('Profil Administrator berhasil disimpan.', 'check_circle', 'text-green-400');
@@ -4191,10 +4544,11 @@ service cloud.firestore {
     // ==========================================
     
     loadRiwayatGuru() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         const container = document.getElementById('riwayat-list');
         const filterBulan = document.getElementById('filter-bulan') ? document.getElementById('filter-bulan').value : new Date().getMonth() + 1;
         const filterTahun = document.getElementById('filter-tahun') ? document.getElementById('filter-tahun').value : new Date().getFullYear();
+        this.pastikanBulanPresensi(Number(filterTahun), Number(filterBulan)); // muat data bulan yang dipilih
         
         container.innerHTML = `<div class="text-center p-4 text-gray-500">Memuat riwayat...</div>`;
 
@@ -4238,7 +4592,7 @@ service cloud.firestore {
 
         // MOCK
         setTimeout(() => {
-            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
             const myNip = userInfo.username || userInfo.nip;
             const myNama = userInfo.nama || '';
             const filterMonthStr = `/${filterBulan.toString().padStart(2, '0')}/${filterTahun}`;
@@ -4274,8 +4628,8 @@ service cloud.firestore {
                         jam_masuk: jMasuk,
                         jam_pulang: jPulang,
                         status: st,
-                        foto_masuk: r.fotoMasuk || r.foto_masuk || '',
-                        foto_pulang: r.fotoPulang || r.foto_pulang || ''
+                        foto_masuk: this.sumberFotoPresensi(r, 'masuk'),
+                        foto_pulang: this.sumberFotoPresensi(r, 'pulang')
                     };
                 });
             
@@ -4287,10 +4641,11 @@ service cloud.firestore {
     },
 
     loadRekapAdmin() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         const tbody = document.getElementById('admin-rekap-tbody');
         const filterBulan = document.getElementById('admin-filter-bulan') ? document.getElementById('admin-filter-bulan').value : new Date().getMonth() + 1;
         const filterTahun = document.getElementById('admin-filter-tahun') ? document.getElementById('admin-filter-tahun').value : new Date().getFullYear();
+        this.pastikanBulanPresensi(Number(filterTahun), Number(filterBulan)); // muat data bulan yang dipilih
         
         if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center p-4">Memuat data...</td></tr>`;
 
@@ -4646,6 +5001,19 @@ service cloud.firestore {
             this.showToast('Lampiran tidak tersedia.', 'info', 'text-blue-400');
             return;
         }
+        // Foto yang disimpan di koleksi foto_presensi: ambil dulu, baru tampilkan
+        if (typeof url === 'string' && url.startsWith('doc:')) {
+            const [, docId, jenis] = url.split(':');
+            if (typeof db === 'undefined' || !docId) return;
+            this.showToast('Memuat foto...', 'hourglass_empty', 'text-blue-400');
+            db.collection('foto_presensi').doc(docId).get().then(snap => {
+                const d = snap.exists ? snap.data() : null;
+                const data = d ? (jenis === 'pulang' ? d.fotoPulang : d.fotoMasuk) : '';
+                if (!data) return this.showToast('Foto tidak ditemukan.', 'info', 'text-blue-400');
+                this.lihatFotoPresensi(data);
+            }).catch(() => this.showToast('Gagal memuat foto. Periksa koneksi internet.', 'wifi_off', 'text-red-400'));
+            return;
+        }
         
         let modal = document.getElementById('dynamic-photo-modal');
         if (!modal) {
@@ -4702,10 +5070,11 @@ service cloud.firestore {
     },
 
     loadRiwayatAdmin() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         const tbody = document.getElementById('admin-riwayat-tbody');
         const filterBulan = document.getElementById('admin-riwayat-bulan') ? document.getElementById('admin-riwayat-bulan').value : new Date().getMonth() + 1;
         const filterTahun = document.getElementById('admin-riwayat-tahun') ? document.getElementById('admin-riwayat-tahun').value : new Date().getFullYear();
+        const bulanSiap = this.pastikanBulanPresensi(Number(filterTahun), Number(filterBulan)); // muat data bulan yang dipilih
         const filterStatus = document.getElementById('admin-riwayat-status') ? document.getElementById('admin-riwayat-status').value : '';
         const filterGuru = document.getElementById('admin-riwayat-guru') ? document.getElementById('admin-riwayat-guru').value : '';
         
@@ -4825,8 +5194,8 @@ service cloud.firestore {
                 jam_masuk: jMasuk,
                 jam_pulang: jPulang,
                 status: st,
-                foto_masuk: r.fotoMasuk || r.foto_masuk || '',
-                foto_pulang: r.fotoPulang || r.foto_pulang || '',
+                foto_masuk: this.sumberFotoPresensi(r, 'masuk'),
+                foto_pulang: this.sumberFotoPresensi(r, 'pulang'),
                 alasan_masuk: r.alasanMasuk || '',
                 alasan_pulang: r.alasanPulang || '',
                 pulang_cepat: !!r.pulangCepat
@@ -4842,6 +5211,10 @@ service cloud.firestore {
 
         const filterBulan = document.getElementById('admin-riwayat-bulan') ? document.getElementById('admin-riwayat-bulan').value : (new Date().getMonth() + 1);
         const filterTahun = document.getElementById('admin-riwayat-tahun') ? document.getElementById('admin-riwayat-tahun').value : new Date().getFullYear();
+        const bulanSiap = this.pastikanBulanPresensi(Number(filterTahun), Number(filterBulan)); // muat data bulan yang dipilih
+        if (!bulanSiap) {
+            return this.showToast('Data bulan ini sedang dimuat. Coba unduh lagi beberapa detik lagi.', 'hourglass_empty', 'text-yellow-400');
+        }
         const filterStatus = document.getElementById('admin-riwayat-status') ? document.getElementById('admin-riwayat-status').value.trim() : '';
         const filterGuru = document.getElementById('admin-riwayat-guru') ? document.getElementById('admin-riwayat-guru').value.trim() : '';
 
@@ -5531,7 +5904,7 @@ service cloud.firestore {
     },
 
     loadIzinAdmin() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         if (!token) return this.logout();
         
         const tbody = document.getElementById('admin-izin-tbody');
@@ -5548,7 +5921,7 @@ service cloud.firestore {
                     if (!item.id) {
                         item.id = 'IZ' + Date.now() + Math.floor(Math.random()*1000).toString().padStart(3, '0');
                         // Simpan ke storage jika id baru dibuat
-                        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                        app.simpanLokal();
                     }
                     let badgeClass = '';
                     const type = item.status.toLowerCase();
@@ -5607,7 +5980,7 @@ service cloud.firestore {
         // Catatan dihapus sementara karena prompt() sering diblokir oleh browser (popup blocker)
         const catatan = "";
 
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         const onSuccess = (res) => {
             if (!res.success) {
                 this.showToast(res.message, 'error', 'text-red-400');
@@ -5698,7 +6071,7 @@ service cloud.firestore {
                     }
                 }
                 
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                app.simpanLokal();
                 this.autoGenerateAlpa();
             }
             setTimeout(() => onSuccess({ success: true }), 500);
@@ -5711,7 +6084,7 @@ service cloud.firestore {
     
     // -- [GURU] --
     loadSlipGuru() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         const container = document.getElementById('guru-slip-list');
         if(!container) return;
         
@@ -5757,7 +6130,7 @@ service cloud.firestore {
             // Mock filtering based on user role (Guru only sees theirs)
             // In real app backend filters this based on token
             let data = this.mockData.slipGaji;
-            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
             if (userInfo && userInfo.role !== 'ADMIN') {
                 data = data.filter(s => s.idGuru === userInfo.id);
             }
@@ -5778,7 +6151,7 @@ service cloud.firestore {
 
     // -- [ADMIN] --
     loadSlipAdmin() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         const tbody = document.getElementById('admin-slip-tbody');
         
         // Update Stats
@@ -6053,7 +6426,7 @@ service cloud.firestore {
     simpanSlip() {
         if(this.state.slipTempData) {
             this.mockData.slipGaji.unshift(this.state.slipTempData);
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             
             // TAHAP 3: Simpan ke koleksi terpisah
             try { if(typeof db !== 'undefined') db.collection('slip_gaji').doc(this.state.slipTempData.id).set(this.state.slipTempData, {merge:true}); } catch(e){}
@@ -6382,7 +6755,7 @@ service cloud.firestore {
             this.presensiState.LOKASI_SEKOLAH = { lat, lng, radius };
 
             // Simpan langsung ke LocalStorage
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
 
             // Simpan ke Firestore
             if (typeof db !== 'undefined') {
@@ -6408,7 +6781,7 @@ service cloud.firestore {
         if (!this.mockData.pengumuman) this.mockData.pengumuman = { aktif: false, teks: '' };
         this.mockData.pengumuman.teks = document.getElementById('admin-input-pengumuman').value;
         this.mockData.pengumuman.aktif = document.getElementById('admin-toggle-pengumuman').checked;
-        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+        app.simpanLokal();
         this.showToast('Pengumuman berhasil disiarkan', 'campaign', 'text-blue-400');
     },
     getRealNipGuru(identifier, namaGuru) {
@@ -6453,7 +6826,7 @@ service cloud.firestore {
         const container = document.getElementById('guru-jurnal-list');
         if (!container) return;
         
-        const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+        const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
         if(!this.mockData.jurnal) this.mockData.jurnal = [];
         
         const realNip = this.getRealNipGuru(userInfo.nip || userInfo.username || userInfo.id, userInfo.nama);
@@ -6504,7 +6877,7 @@ service cloud.firestore {
         this.showToast('Menyiapkan PDF...', 'sync', 'text-blue-400');
         
         setTimeout(() => {
-            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
             if (!userInfo || !userInfo.nama) return;
             
             const realNip = this.getRealNipGuru(userInfo.nip || userInfo.username || userInfo.id, userInfo.nama);
@@ -6888,7 +7261,7 @@ service cloud.firestore {
     },
 
     async submitJurnal() {
-        const userInfo = JSON.parse(localStorage.getItem('user_info'));
+        const userInfo = JSON.parse(localStorage.getItem(USER_KEY));
         if (!userInfo) return this.logout();
         
         const kelas = (document.getElementById('jurnal-kelas')?.value || '').trim();
@@ -6940,7 +7313,7 @@ service cloud.firestore {
             this.mockData.jurnalLamaMainState = this.mockData.jurnal;
             
             // Simpan langsung ke LocalStorage
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             
             // Simpan ke Firestore koleksi jurnal_guru
             if (typeof db !== 'undefined') {
@@ -6975,7 +7348,7 @@ service cloud.firestore {
 
 
     submitIzin() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         if (!token) return this.logout();
         
         const jenis = document.querySelector('input[name="jenis-izin"]:checked')?.value;
@@ -7014,7 +7387,7 @@ service cloud.firestore {
             };
             
             setTimeout(() => {
-                const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+                const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
                 const newIzin = {
                     id: 'IZ' + Date.now() + Math.floor(Math.random()*1000).toString().padStart(3, '0'),
                     timestamp: new Date().toISOString(),
@@ -7030,7 +7403,7 @@ service cloud.firestore {
                 };
                 if (!Array.isArray(this.mockData.izinAdmin)) this.mockData.izinAdmin = [];
                 this.mockData.izinAdmin.unshift(newIzin);
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                app.simpanLokal();
                 this.autoGenerateAlpa();
                 
                 // TAHAP 3: Simpan ke koleksi terpisah
@@ -7101,7 +7474,7 @@ service cloud.firestore {
     },
 
     loadIzinGuru() {
-        const token = localStorage.getItem('session_token');
+        const token = localStorage.getItem(SESSION_KEY);
         if (!token) return this.logout();
         
         const container = document.getElementById('izin-list');
@@ -7153,7 +7526,7 @@ service cloud.firestore {
         
             // MOCK
             setTimeout(() => {
-                const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+                const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
                 const myIzin = this.mockData.izinAdmin.filter(i => i.nip === (userInfo.username || userInfo.nip));
                 onSuccess({ success: true, data: myIzin });
             }, 800);
@@ -7196,7 +7569,7 @@ service cloud.firestore {
                         return (a.nama || '').localeCompare(b.nama || '');
                     });
                     try {
-                        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                        app.simpanLokal();
                     } catch(e) {}
                 }
                 this.renderDataGuru();
@@ -7342,7 +7715,7 @@ service cloud.firestore {
         const curShift = (guru.shift || 'Pagi').toLowerCase();
         const nextShift = curShift === 'siang' ? 'Pagi' : 'Siang';
         guru.shift = nextShift;
-        localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+        app.simpanLokal();
         
         try {
             if (typeof db !== 'undefined') {
@@ -7352,7 +7725,7 @@ service cloud.firestore {
         
         if (this.state && this.state.currentUser && (this.state.currentUser.id === id || this.state.currentUser.username === guru.username)) {
             this.state.currentUser.shift = nextShift;
-            try { localStorage.setItem('user_info', JSON.stringify(this.state.currentUser)); } catch(e) {}
+            try { localStorage.setItem(USER_KEY, JSON.stringify(this.state.currentUser)); } catch(e) {}
         }
         
         this.showToast(`Shift guru ${guru.nama} berhasil diubah ke Shift ${nextShift}.`, 'check_circle', 'text-green-400');
@@ -7367,7 +7740,7 @@ service cloud.firestore {
         const nextStatus = curStatus === 'aktif' ? 'Nonaktif' : 'Aktif';
         if(confirm(`Anda yakin ingin me-${nextStatus.toLowerCase()}kan akun guru ${guru.nama}?`)) {
             guru.statusAkun = nextStatus;
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             // Simpan ke koleksi data_guru agar berlaku di semua perangkat
             try {
                 if (typeof db !== 'undefined') {
@@ -7579,7 +7952,7 @@ service cloud.firestore {
                 }
                 
                 // Simpan perubahan ke localStorage
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+                app.simpanLokal();
                 
                 // TAHAP 2: Simpan ke koleksi terpisah
                 try { if(typeof db !== 'undefined') db.collection('data_guru').doc(id).set(g, {merge:true}); } catch(e){}
@@ -7587,7 +7960,7 @@ service cloud.firestore {
                 // Sinkronkan currentUser jika guru yang diedit sedang login di sesi ini
                 if (this.state && this.state.currentUser && (this.state.currentUser.id === id || this.state.currentUser.username === g.username)) {
                     this.state.currentUser = { ...this.state.currentUser, ...g };
-                    try { localStorage.setItem('user_info', JSON.stringify(this.state.currentUser)); } catch(e) {}
+                    try { localStorage.setItem(USER_KEY, JSON.stringify(this.state.currentUser)); } catch(e) {}
                 }
 
                 this.showToast('Data guru berhasil diperbarui.', 'check_circle', 'text-green-400');
@@ -7622,7 +7995,7 @@ service cloud.firestore {
                 createdAt: new Date().toISOString()
             };
             this.mockData.dataGuru.unshift(newGuru);
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(this.mockData));
+            app.simpanLokal();
             
             // TAHAP 2: Simpan ke koleksi terpisah
             try { if(typeof db !== 'undefined') db.collection('data_guru').doc(id).set(newGuru, {merge:true}); } catch(e){}
@@ -9821,7 +10194,14 @@ service cloud.firestore {
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
-    app.init();
+    // Tunggu konfigurasi sekolah dimuat, baru jalankan aplikasi
+    (window.SEKOLAH_SIAP || Promise.resolve({ status: 'pilih' })).then(hasil => {
+        if (hasil && hasil.status === 'ok') {
+            app.init();
+        } else if (typeof window.tampilkanLayarSekolah === 'function') {
+            window.tampilkanLayarSekolah(hasil || { status: 'pilih' });
+        }
+    });
 });
 
 

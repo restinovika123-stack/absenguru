@@ -1,9 +1,9 @@
 // Ganti nomor versi ini setiap kali aplikasi diperbarui
-const CACHE_NAME = 'presensi-guru-v4';
+const CACHE_NAME = 'presensi-guru-v5';
 const urlsToCache = [
-  './index.html',
-  './manifest.json',
-  './xlsx.bundle.js'
+  '/index.html',
+  '/manifest.json',
+  '/xlsx.bundle.js'
 ];
 
 self.addEventListener('install', event => {
@@ -41,14 +41,17 @@ self.addEventListener('fetch', event => {
         .then(response => {
           if (response && response.ok) {
             const copy = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+            caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
           }
           return response;
         })
-        .catch(() => caches.match('./index.html'))
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
+
+  // Daftar sekolah selalu diambil langsung dari internet (tidak dari cache)
+  if (url.origin === self.location.origin && url.pathname.startsWith('/sekolah/')) return;
 
   // File lain: pakai cache jika ada, jika tidak ambil dari internet
   event.respondWith(
